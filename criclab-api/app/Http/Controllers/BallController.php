@@ -6,6 +6,7 @@ use App\Models\Ball;
 use App\Models\Innings;
 use App\Models\CricketMatch;
 use App\Models\Player;
+use App\Models\Team;
 use Illuminate\Http\Request;
 
 class BallController extends Controller
@@ -18,7 +19,7 @@ class BallController extends Controller
             'over_number' => 'required|integer',
             'ball_in_over' => 'required|integer',
             'batter_id' => 'required|uuid|exists:players,id',
-            'non_striker_id' => 'required|uuid|exists:players,id',
+            'non_striker_id' => 'nullable|uuid|exists:players,id',
             'bowler_id' => 'required|uuid|exists:players,id',
             'runs' => 'required|integer',
             'extra_runs' => 'required|integer',
@@ -51,15 +52,62 @@ class BallController extends Controller
         $newWickets = $innings->wickets + ($request->is_wicket ? 1 : 0);
         $newLegal = $innings->legal_balls + ($request->is_legal ? 1 : 0);
 
-        // Get max wickets (all out is when wickets count = batting players - 1)
+        // Get max wickets (all out is when wickets count = batting players - 1, or batting players if last man stands)
         // Note: batting team is batting, so we check batting players!
         $battingPlayersCount = Player::where('team_id', $innings->batting_team_id)->count();
-        $maxWickets = $battingPlayersCount > 0 ? $battingPlayersCount - 1 : 10;
+        $isLastMan = $match->last_man_batting;
+        $maxWickets = $battingPlayersCount > 0 
+            ? ($isLastMan ? $battingPlayersCount : $battingPlayersCount - 1) 
+            : 10;
         if ($maxWickets <= 0) $maxWickets = 10;
 
         $isClosed = false;
         if ($newLegal >= $match->overs * 6 || $newWickets >= $maxWickets || $newWickets >= 10) {
             $isClosed = true;
+        }
+
+        // Check if this is the second innings
+        if ($innings->innings_no === 2) {
+            $firstInnings = Innings::where('match_id', $match->id)
+                ->where('innings_no', 1)
+                ->first();
+
+            if ($firstInnings) {
+                if ($newRuns > $firstInnings->runs) {
+                    $isClosed = true;
+
+                    // End the match automatically (Chased target)
+                    $chasingTeam = Team::find($innings->batting_team_id);
+                    $wicketsRemaining = $isLastMan 
+                        ? ($battingPlayersCount - $newWickets) 
+                        : (($battingPlayersCount > 0 ? $battingPlayersCount - 1 : 10) - $newWickets);
+                    
+                    if ($wicketsRemaining < 0) $wicketsRemaining = 0;
+                    
+                    $result = ($chasingTeam->name ?? 'Second Team') . ' won by ' . $wicketsRemaining . ' ' . ($wicketsRemaining === 1 ? 'wicket' : 'wickets');
+                    
+                    $match->update([
+                        'status' => 'past',
+                        'result' => $result,
+                    ]);
+                    $match->innings()->update(['is_closed' => true]);
+                } elseif ($isClosed) {
+                    // Innings completed but failed to chase (or tied)
+                    $defendingTeam = Team::find($firstInnings->batting_team_id);
+                    
+                    if ($newRuns === $firstInnings->runs) {
+                        $result = 'Match tied';
+                    } else {
+                        $result = ($defendingTeam->name ?? 'First Team') . ' won by ' . ($firstInnings->runs - $newRuns) . ' runs';
+                    }
+                    
+                    $match->update([
+                        'status' => 'past',
+                        'result' => $result,
+                    ]);
+                    $match->innings()->update(['is_closed' => true]);
+                }
+            }
         }
 
         $innings->update([

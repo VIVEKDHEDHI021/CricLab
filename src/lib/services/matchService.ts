@@ -29,12 +29,14 @@ export const matchService = {
     match_type: string;
     ground: string;
     match_date: string;
+    last_man_batting?: boolean;
   }): Promise<{ id: string }> {
     const { data } = await api.post<{ id: string }>('/matches', {
       ...matchData,
       match_date: new Date(matchData.match_date).toISOString(),
       batting_first_id: matchData.team_a_id,
       status: 'upcoming',
+      last_man_batting: matchData.last_man_batting ?? false,
     });
     return data;
   },

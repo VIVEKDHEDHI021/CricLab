@@ -19,6 +19,7 @@ function NewMatch() {
   const [form, setForm] = useState({
     team_a_id: "", team_b_id: "", overs: 6, wide_run: 1, noball_run: 1,
     match_type: "T6", ground: "", match_date: new Date().toISOString().slice(0, 16),
+    last_man_batting: false,
   });
 
   useEffect(() => {
@@ -75,6 +76,15 @@ function NewMatch() {
             <SelectContent>
               <SelectItem value="0">0 run</SelectItem>
               <SelectItem value="1">1 run</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Last man batting rule">
+          <Select value={String(form.last_man_batting)} onValueChange={(v) => setForm({ ...form, last_man_batting: v === "true" })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="false">Disabled (Normal)</SelectItem>
+              <SelectItem value="true">Enabled (Last man can bat alone)</SelectItem>
             </SelectContent>
           </Select>
         </Field>

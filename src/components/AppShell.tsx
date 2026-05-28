@@ -34,7 +34,7 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
       </header>
       <main className="flex-1 px-4 pb-28 pt-4 max-w-xl w-full mx-auto">{children}</main>
 
-      {role === "admin" && (
+      {role === "admin" && loc.pathname === "/dashboard" && (
         <Link
           to="/matches/new"
           className="fixed bottom-20 right-5 z-30 h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/40 flex items-center justify-center active:scale-95"

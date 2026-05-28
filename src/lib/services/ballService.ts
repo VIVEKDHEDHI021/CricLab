@@ -8,7 +8,7 @@ export type Ball = {
   over_number: number;
   ball_in_over: number;
   batter_id: string;
-  non_striker_id: string;
+  non_striker_id: string | null;
   bowler_id: string;
   runs: number;
   extra_runs: number;
@@ -26,7 +26,7 @@ export const ballService = {
       over_number: number;
       ball_in_over: number;
       batter_id: string;
-      non_striker_id: string;
+      non_striker_id: string | null;
       bowler_id: string;
       runs: number;
       extra_runs: number;

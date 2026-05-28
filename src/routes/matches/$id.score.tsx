@@ -52,6 +52,51 @@ function LiveScoring() {
   const bowlingPlayers = players.filter((p) => p.team_id === bowlingTeam);
   const innBalls = balls.filter((b) => b.innings_id === currentInn?.id);
 
+  const outBatterIds = useMemo(() => {
+    return new Set(
+      innBalls
+        .filter((b) => b.is_wicket)
+        .map((b) => b.batter_id)
+        .filter(Boolean)
+    );
+  }, [innBalls]);
+
+  const activeBattingPlayers = useMemo(() => {
+    return battingPlayers.filter((p) => !outBatterIds.has(p.id));
+  }, [battingPlayers, outBatterIds]);
+
+  const isLastManRemaining = useMemo(() => {
+    return !!(match?.last_man_batting && activeBattingPlayers.length === 1);
+  }, [match, activeBattingPlayers]);
+
+  const firstInnings = useMemo(() => innings.find((i) => i.innings_no === 1), [innings]);
+
+  const isInningsOver = useMemo(() => {
+    if (!currentInn || !match) return false;
+    const maxWickets = battingPlayers.length > 0 
+      ? (match.last_man_batting ? battingPlayers.length : battingPlayers.length - 1) 
+      : 10;
+    
+    // Check if target is chased
+    if (currentInn.innings_no === 2 && firstInnings && currentInn.runs > firstInnings.runs) {
+      return true;
+    }
+    
+    return currentInn.legal_balls >= match.overs * 6 || currentInn.wickets >= maxWickets || currentInn.wickets >= 10;
+  }, [currentInn, match, battingPlayers, firstInnings]);
+
+  useEffect(() => {
+    if (isLastManRemaining) {
+      const loneBatsmanId = activeBattingPlayers[0].id;
+      if (striker !== loneBatsmanId) {
+        setStriker(loneBatsmanId);
+      }
+      if (nonStriker !== "") {
+        setNonStriker("");
+      }
+    }
+  }, [isLastManRemaining, activeBattingPlayers, striker, nonStriker]);
+
   const startInnings = async (battingTeamId: string) => {
     if (!match) return;
     const bowlingTeamId = battingTeamId === match.team_a_id ? match.team_b_id : match.team_a_id;
@@ -81,8 +126,12 @@ function LiveScoring() {
 
   const addBall = async (kind: "run" | "wide" | "no_ball" | "bye" | "leg_bye" | "wicket", runs = 0) => {
     if (!currentInn) return toast.error("Start an innings first");
+    const isLastManActive = !!(match?.last_man_batting && currentInn.wickets >= (battingPlayers.length > 0 ? battingPlayers.length - 1 : 10));
+
     if (!striker || !bowler) return toast.error("Select striker and bowler");
-    if (!nonStriker || nonStriker === striker) return toast.error("Select a non-striker");
+    if (!isLastManActive && (!nonStriker || nonStriker === striker)) {
+      return toast.error("Select a non-striker");
+    }
     const wideRun = match.wide_run ?? 1;
     const noballRun = match.noball_run ?? 1;
     const isLegal = kind === "run" || kind === "bye" || kind === "leg_bye" || kind === "wicket";
@@ -106,7 +155,7 @@ function LiveScoring() {
         over_number: overNo,
         ball_in_over: isLegal ? ballInOver : (legalCount % 6) + 1,
         batter_id: striker,
-        non_striker_id: nonStriker,
+        non_striker_id: isLastManActive ? null : nonStriker,
         bowler_id: bowler,
         runs: batterRuns,
         extra_runs: extraRuns,
@@ -116,19 +165,27 @@ function LiveScoring() {
       });
 
       // strike rotation on odd batter runs (not on wide; on no_ball with runs yes)
-      if ((kind === "run" || kind === "bye" || kind === "leg_bye" || kind === "no_ball") && batterRuns % 2 === 1) {
+      if (!isLastManActive && (kind === "run" || kind === "bye" || kind === "leg_bye" || kind === "no_ball") && batterRuns % 2 === 1) {
         setStriker(nonStriker); setNonStriker(striker);
       }
       // end of over swap
       const newLegal = currentInn.legal_balls + (isLegal ? 1 : 0);
       if (isLegal && newLegal % 6 === 0) {
-        setStriker(nonStriker); setNonStriker(striker);
+        if (!isLastManActive) {
+          setStriker(nonStriker); setNonStriker(striker);
+        }
         toast.success("End of over");
       }
       
       const newWickets = currentInn.wickets + (isWicket ? 1 : 0);
-      if (newLegal >= match.overs * 6 || newWickets >= bowlingPlayers.length || newWickets >= 10) {
+      const maxWickets = battingPlayers.length > 0 
+        ? (match.last_man_batting ? battingPlayers.length : battingPlayers.length - 1) 
+        : 10;
+      if (newLegal >= match.overs * 6 || newWickets >= maxWickets || newWickets >= 10) {
         toast.success("Innings closed");
+      } else if (kind === "wicket") {
+        setStriker("");
+        toast.info("Wicket! Select new batsman");
       }
 
       reload();
@@ -164,6 +221,20 @@ function LiveScoring() {
         </AppShell>
       );
     }
+
+    if (innings.length === 1) {
+      const opponentTeamId = innings[0].batting_team_id === match.team_a_id ? match.team_b_id : match.team_a_id;
+      return (
+        <AppShell title="Start innings">
+          <Card className="p-4 rounded-2xl space-y-3 text-center">
+            <h3 className="font-semibold text-lg">Innings 1 Complete</h3>
+            <p className="text-sm text-muted-foreground">{teamName(innings[0].batting_team_id)} finished their innings.</p>
+            <Button className="w-full mt-2" onClick={() => startInnings(opponentTeamId)}>Start {teamName(opponentTeamId)} Innings</Button>
+          </Card>
+        </AppShell>
+      );
+    }
+
     return (
       <AppShell title="Start innings">
         <Card className="p-4 rounded-2xl space-y-3">
@@ -179,7 +250,14 @@ function LiveScoring() {
   return (
     <AppShell title="Live scoring">
       <Card className="p-4 rounded-2xl mb-3">
-        <div className="text-xs text-muted-foreground">{teamName(battingTeam!)} batting</div>
+        <div className="flex justify-between items-start mb-1">
+          <div className="text-xs text-muted-foreground">{teamName(battingTeam!)} batting</div>
+          {currentInn.innings_no === 2 && firstInnings && (
+            <div className="text-xs font-semibold text-primary">
+              Target: {firstInnings.runs + 1} ({teamName(firstInnings.batting_team_id)} 1st Inn: {firstInnings.runs}/{firstInnings.wickets} in {oversText(firstInnings.legal_balls)} ov)
+            </div>
+          )}
+        </div>
         <div className="flex justify-between items-baseline">
           <div className="text-3xl font-bold">{currentInn.runs}/{currentInn.wickets}</div>
           <div className="font-mono text-muted-foreground">{oversText(currentInn.legal_balls)} / {match.overs}</div>
@@ -187,23 +265,23 @@ function LiveScoring() {
       </Card>
 
       <Card className="p-3 rounded-2xl mb-3 space-y-2">
-        <PSelect label="Striker" value={striker} onChange={setStriker} options={battingPlayers} />
-        <PSelect label="Non-striker" value={nonStriker} onChange={setNonStriker} options={battingPlayers} />
+        <PSelect label="Striker" value={striker} onChange={setStriker} options={activeBattingPlayers} />
+        <PSelect label="Non-striker" value={nonStriker} onChange={setNonStriker} options={activeBattingPlayers} disabled={isLastManRemaining} />
         <PSelect label="Bowler" value={bowler} onChange={setBowler} options={bowlingPlayers} />
       </Card>
 
       <div className="grid grid-cols-4 gap-2 mb-2">
         {[0,1,2,3,4,6].map((r) => (
-          <Button key={r} variant={r === 4 || r === 6 ? "default" : "secondary"} onClick={() => addBall("run", r)}>{r}</Button>
+          <Button key={r} variant={r === 4 || r === 6 ? "default" : "secondary"} onClick={() => addBall("run", r)} disabled={isInningsOver}>{r}</Button>
         ))}
       </div>
       <div className="grid grid-cols-3 gap-2 mb-2">
-        <Button variant="outline" onClick={() => addBall("wide")}>Wide</Button>
-        <Button variant="outline" onClick={() => addBall("no_ball", 0)}>No ball</Button>
-        <Button variant="outline" onClick={() => addBall("bye", 1)}>Bye</Button>
-        <Button variant="outline" onClick={() => addBall("leg_bye", 1)}>Leg bye</Button>
-        <Button variant="destructive" onClick={() => addBall("wicket")}>Wicket</Button>
-        <Button variant="secondary" onClick={undo}>Undo</Button>
+        <Button variant="outline" onClick={() => addBall("wide")} disabled={isInningsOver}>Wide</Button>
+        <Button variant="outline" onClick={() => addBall("no_ball", 0)} disabled={isInningsOver}>No ball</Button>
+        <Button variant="outline" onClick={() => addBall("bye", 1)} disabled={isInningsOver}>Bye</Button>
+        <Button variant="outline" onClick={() => addBall("leg_bye", 1)} disabled={isInningsOver}>Leg bye</Button>
+        <Button variant="destructive" onClick={() => addBall("wicket")} disabled={isInningsOver}>Wicket</Button>
+        <Button variant="secondary" onClick={undo} disabled={isInningsOver}>Undo</Button>
       </div>
 
       <Card className="p-3 rounded-2xl mt-3">
@@ -223,12 +301,12 @@ function LiveScoring() {
   );
 }
 
-function PSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: any[] }) {
+function PSelect({ label, value, onChange, options, disabled }: { label: string; value: string; onChange: (v: string) => void; options: any[]; disabled?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-sm text-muted-foreground w-24">{label}</span>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="flex-1"><SelectValue placeholder="Select" /></SelectTrigger>
+      <Select value={value} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger className="flex-1" disabled={disabled}><SelectValue placeholder="Select" /></SelectTrigger>
         <SelectContent>{options.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
       </Select>
     </div>

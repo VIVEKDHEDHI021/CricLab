@@ -9,6 +9,8 @@ import { toast } from "sonner";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 
+import { Card } from "@/components/ui/card";
+
 export const Route = createFileRoute("/matches/")({ component: MatchesList });
 
 function MatchesList() {
@@ -40,7 +42,12 @@ function MatchesList() {
           {(data ?? []).map((m) => (
             <MatchCard key={m.id} m={m} isAdmin={role === "admin"} onDelete={onDelete} />
           ))}
-          {(data ?? []).length === 0 && <div className="text-muted-foreground">No matches yet.</div>}
+          {(data ?? []).length === 0 && (
+            <Card className="p-8 text-center border-dashed border-2 border-border/80 bg-muted/5 rounded-2xl flex flex-col items-center justify-center gap-1.5 my-2">
+              <p className="text-sm font-medium text-muted-foreground">No matches found</p>
+              <p className="text-xs text-muted-foreground/60">Create a new match or check back later.</p>
+            </Card>
+          )}
         </div>
       )}
     </AppShell>

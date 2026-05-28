@@ -9,13 +9,17 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 #[Fillable([
     'team_a_id', 'team_b_id', 'overs', 'wide_run', 'noball_run',
     'match_type', 'ground', 'match_date', 'status', 'result',
-    'batting_first_id', 'current_innings', 'created_by'
+    'batting_first_id', 'current_innings', 'created_by', 'last_man_batting'
 ])]
 class CricketMatch extends Model
 {
     use HasUuid;
 
     protected $table = 'matches';
+
+    protected $casts = [
+        'last_man_batting' => 'boolean',
+    ];
 
     public function teamA()
     {

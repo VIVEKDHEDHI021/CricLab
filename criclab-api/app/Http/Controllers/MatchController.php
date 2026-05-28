@@ -22,6 +22,7 @@ class MatchController extends Controller
                 'match_type' => $m->match_type,
                 'overs' => $m->overs,
                 'result' => $m->result,
+                'last_man_batting' => $m->last_man_batting,
                 'team_a' => $m->teamA ? ['id' => $m->teamA->id, 'name' => $m->teamA->name] : null,
                 'team_b' => $m->teamB ? ['id' => $m->teamB->id, 'name' => $m->teamB->name] : null,
                 'innings' => $m->innings->map(function ($i) {
@@ -69,6 +70,7 @@ class MatchController extends Controller
             'match_date' => 'required|string',
             'status' => 'required|string|in:upcoming,live,past',
             'batting_first_id' => 'required|uuid|exists:teams,id',
+            'last_man_batting' => 'nullable|boolean',
         ]);
 
         $match = CricketMatch::create([
@@ -82,6 +84,7 @@ class MatchController extends Controller
             'match_date' => date('Y-m-d H:i:s', strtotime($request->match_date)),
             'status' => $request->status,
             'batting_first_id' => $request->batting_first_id,
+            'last_man_batting' => $request->last_man_batting ?? false,
             'created_by' => $request->user()->id,
         ]);
 
@@ -99,18 +102,27 @@ class MatchController extends Controller
     {
         $match = CricketMatch::findOrFail($id);
         $innings = $match->innings;
-        $teamA = Team::find($match->team_a_id);
-        $teamB = Team::find($match->team_b_id);
 
-        $innA = $innings->where('batting_team_id', $match->team_a_id)->first();
-        $innB = $innings->where('batting_team_id', $match->team_b_id)->first();
+        $inn1 = $innings->where('innings_no', 1)->first();
+        $inn2 = $innings->where('innings_no', 2)->first();
 
         $result = "Match ended";
-        if ($innA && $innB) {
-            if ($innA->runs > $innB->runs) {
-                $result = ($teamA->name ?? 'Team A') . ' won by ' . ($innA->runs - $innB->runs) . ' runs';
-            } elseif ($innB->runs > $innA->runs) {
-                $result = ($teamB->name ?? 'Team B') . ' won by ' . ($innB->runs - $innA->runs) . ' runs';
+        if ($inn1 && $inn2) {
+            $team1 = Team::find($inn1->batting_team_id);
+            $team2 = Team::find($inn2->batting_team_id);
+
+            if ($inn1->runs > $inn2->runs) {
+                $result = ($team1->name ?? 'First Team') . ' won by ' . ($inn1->runs - $inn2->runs) . ' runs';
+            } elseif ($inn2->runs > $inn1->runs) {
+                $battingPlayersCount = Player::where('team_id', $inn2->batting_team_id)->count();
+                $isLastMan = $match->last_man_batting;
+                $wicketsRemaining = $isLastMan 
+                    ? ($battingPlayersCount - $inn2->wickets) 
+                    : (($battingPlayersCount > 0 ? $battingPlayersCount - 1 : 10) - $inn2->wickets);
+                
+                if ($wicketsRemaining < 0) $wicketsRemaining = 0;
+                
+                $result = ($team2->name ?? 'Second Team') . ' won by ' . $wicketsRemaining . ' ' . ($wicketsRemaining === 1 ? 'wicket' : 'wickets');
             } else {
                 $result = 'Match tied';
             }
