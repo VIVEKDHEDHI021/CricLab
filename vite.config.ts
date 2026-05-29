@@ -14,3 +14,4 @@ export default defineConfig({
   },
   nitro: true,
 });
+// Trigger redeploy with verified Git email
