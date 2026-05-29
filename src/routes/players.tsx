@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { playerService, type Player } from "@/lib/services/playerService";
@@ -74,10 +74,10 @@ function PlayersPage() {
           return (
             <Card key={p.id} className="p-3 rounded-2xl">
               <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-semibold">{p.name}</div>
+                <Link to="/players/$id" params={{ id: p.id }} className="hover:underline flex-1">
+                  <div className="font-semibold text-foreground">{p.name}</div>
                   <div className="text-xs text-muted-foreground">{team || "—"}</div>
-                </div>
+                </Link>
                 {isAdmin && <Button size="icon" variant="outline" onClick={() => del(p.id)}><Trash2 className="h-4 w-4" /></Button>}
               </div>
               <div className="grid grid-cols-5 gap-1 mt-2 text-center text-xs">

@@ -18,6 +18,16 @@ export const authService = {
     return data;
   },
 
+  async register(name: string, mobile: string, password: string, passwordConfirmation: string): Promise<LoginResponse> {
+    const { data } = await api.post<LoginResponse>('/register', {
+      name,
+      mobile,
+      password,
+      password_confirmation: passwordConfirmation,
+    });
+    return data;
+  },
+
   async logout(): Promise<void> {
     await api.post('/logout');
   },

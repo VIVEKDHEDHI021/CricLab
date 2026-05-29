@@ -31,6 +31,10 @@ class BallController extends Controller
         $innings = Innings::findOrFail($inningsId);
         $match = CricketMatch::findOrFail($request->match_id);
 
+        if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
+            return response()->json(['message' => 'You are not authorized to score this match.'], 403);
+        }
+
         $ball = Ball::create([
             'innings_id' => $inningsId,
             'match_id' => $request->match_id,
@@ -117,13 +121,20 @@ class BallController extends Controller
             'is_closed' => $isClosed,
         ]);
 
+        \App\Events\MatchUpdated::dispatch($match);
+
         return response()->json($ball, 201);
     }
 
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         $ball = Ball::findOrFail($id);
         $innings = Innings::findOrFail($ball->innings_id);
+        $match = CricketMatch::findOrFail($innings->match_id);
+
+        if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
+            return response()->json(['message' => 'You are not authorized to score this match.'], 403);
+        }
 
         $totalRuns = $ball->runs + $ball->extra_runs;
         $newRuns = max(0, $innings->runs - $totalRuns);
@@ -138,6 +149,8 @@ class BallController extends Controller
         ]);
 
         $ball->delete();
+
+        \App\Events\MatchUpdated::dispatch($match);
 
         return response()->json(['message' => 'Ball deleted successfully.']);
     }

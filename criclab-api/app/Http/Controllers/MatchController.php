@@ -17,6 +17,7 @@ class MatchController extends Controller
             return [
                 'id' => $m->id,
                 'status' => $m->status,
+                'created_by' => $m->created_by,
                 'match_date' => $m->match_date,
                 'ground' => $m->ground,
                 'match_type' => $m->match_type,
@@ -98,9 +99,14 @@ class MatchController extends Controller
         return response()->json(['message' => 'Match deleted successfully.']);
     }
 
-    public function end($id)
+    public function end(Request $request, $id)
     {
         $match = CricketMatch::findOrFail($id);
+
+        if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
+            return response()->json(['message' => 'You are not authorized to score this match.'], 403);
+        }
+
         $innings = $match->innings;
 
         $inn1 = $innings->where('innings_no', 1)->first();
@@ -135,6 +141,8 @@ class MatchController extends Controller
 
         // Close all innings for the match
         $match->innings()->update(['is_closed' => true]);
+
+        \App\Events\MatchUpdated::dispatch($match);
 
         return response()->json(['result' => $result]);
     }

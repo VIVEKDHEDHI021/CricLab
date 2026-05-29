@@ -1,9 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import { authService } from "@/lib/services/authService";
 import { setToken } from "@/lib/api";
 import { useAuth, Role } from "@/hooks/useAuth";
+import { updateEchoAuth } from "@/lib/echo";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,6 +60,7 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
     try {
       const { token } = await authService.login(mobile, password, expectedRole ?? "user");
       setToken(token);
+      updateEchoAuth();
       await refreshRole();
       toast.success("Signed in");
       nav({ to: "/dashboard" });
@@ -87,7 +88,13 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
         {busy ? "Please wait…" : "Sign in"}
       </Button>
       {expectedRole === "user" && (
-        <p className="text-[11px] text-muted-foreground text-center">Password reset is handled by an admin.</p>
+        <div className="space-y-2 pt-2">
+          <p className="text-[11px] text-muted-foreground text-center">Password reset is handled by an admin.</p>
+          <div className="text-center text-xs border-t border-border/40 pt-2">
+            <span className="text-muted-foreground">New to CricLab? </span>
+            <Link to="/register" className="text-primary hover:underline font-semibold">Register here</Link>
+          </div>
+        </div>
       )}
     </form>
   );

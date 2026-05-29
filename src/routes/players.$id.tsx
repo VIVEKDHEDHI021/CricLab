@@ -2,10 +2,10 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { playerService, type PlayerProfile, type Player } from "@/lib/services/playerService";
+import { friendService, type Friend } from "@/lib/services/friendService";
 import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -13,21 +13,26 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { 
-  Edit, Share2, Trophy, Calendar, Shield, Award, Sparkles, Activity, 
-  ChevronRight, User, LogOut, Loader2, Info
+  Edit, Share2, UserPlus, UserMinus, Trophy, Calendar, 
+  Shield, Award, Sparkles, Activity, ChevronRight, User
 } from "lucide-react";
 
-export const Route = createFileRoute("/profile")({
-  component: UserProfilePage,
+export const Route = createFileRoute("/players/$id")({
+  component: PlayerProfilePage,
 });
 
-function UserProfilePage() {
-  const { user, profileName, mobile, role, signOut } = useAuth();
+function PlayerProfilePage() {
+  const { id } = Route.useParams();
+  const { user: currentUser } = useAuth();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<PlayerProfile | null>(null);
   
+  // Follow/Friend states
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [connecting, setConnecting] = useState(false);
+
   // Edit Modal states
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -43,35 +48,30 @@ function UserProfilePage() {
   const [saving, setSaving] = useState(false);
 
   const fetchProfile = async () => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
     try {
       setLoading(true);
-      const players = await playerService.getPlayers();
-      const found = players.find(p => p.mobile === user.mobile || p.user_id === user.id);
-      
-      if (found) {
-        const data = await playerService.getPlayerProfile(found.id);
-        setProfile(data);
+      const data = await playerService.getPlayerProfile(id);
+      setProfile(data);
 
-        // Populate Edit Form
-        setEditForm({
-          name: data.player.name || "",
-          mobile: data.player.mobile || "",
-          role: data.player.role || "",
-          batting_style: data.player.batting_style || "",
-          bowling_style: data.player.bowling_style || "",
-          jersey_number: data.player.jersey_number || "",
-          catches: data.player.catches || 0,
-          run_outs: data.player.run_outs || 0,
-        });
-      } else {
-        setProfile(null);
+      // Populate Edit Form
+      setEditForm({
+        name: data.player.name || "",
+        mobile: data.player.mobile || "",
+        role: data.player.role || "",
+        batting_style: data.player.batting_style || "",
+        bowling_style: data.player.bowling_style || "",
+        jersey_number: data.player.jersey_number || "",
+        catches: data.player.catches || 0,
+        run_outs: data.player.run_outs || 0,
+      });
+
+      // Fetch friends for connection check
+      if (currentUser) {
+        const friendList = await friendService.getFriends();
+        setFriends(friendList);
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message || "Failed to load profile details");
+      toast.error(err.response?.data?.message || err.message || "Failed to load player profile");
     } finally {
       setLoading(false);
     }
@@ -79,42 +79,54 @@ function UserProfilePage() {
 
   useEffect(() => {
     fetchProfile();
-  }, [user]);
+  }, [id, currentUser]);
 
-  const handleShare = async () => {
-    if (!profile?.player.id) {
-      toast.error("No player profile available to share");
-      return;
-    }
-    const shareUrl = `${window.location.origin}/players/${profile.player.id}`;
-    const shareData = {
-      title: `${profile.player.name} - CricLab Player Profile`,
-      text: `Checkout ${profile.player.name}'s statistics, records, and performance history on CricLab!`,
-      url: shareUrl,
-    };
+  const isOwnerOrAdmin = useMemo(() => {
+    if (!currentUser || !profile) return false;
+    return currentUser.role === "admin" || profile.player.user_id === currentUser.id;
+  }, [currentUser, profile]);
 
-    if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
-      try {
-        await navigator.share(shareData);
-        toast.success("Profile shared successfully!");
-      } catch (err: any) {
-        if (err.name !== "AbortError") {
-          navigator.clipboard.writeText(shareUrl);
-          toast.success("Profile link copied to clipboard!");
-        }
+  const isConnected = useMemo(() => {
+    if (!profile?.player.mobile) return false;
+    return friends.some(f => f.profile?.mobile === profile.player.mobile);
+  }, [friends, profile]);
+
+  const friendRecordId = useMemo(() => {
+    if (!profile?.player.mobile) return null;
+    return friends.find(f => f.profile?.mobile === profile.player.mobile)?.id ?? null;
+  }, [friends, profile]);
+
+  const handleShare = () => {
+    navigator.clipboard.writeText(window.location.href);
+    toast.success("Profile link copied to clipboard!");
+  };
+
+  const handleConnectionToggle = async () => {
+    if (!profile?.player.mobile) return;
+    setConnecting(true);
+    try {
+      if (isConnected && friendRecordId) {
+        await friendService.removeFriend(friendRecordId);
+        toast.success("Removed connection");
+      } else {
+        await friendService.addFriend(profile.player.mobile);
+        toast.success("Connected successfully!");
       }
-    } else {
-      navigator.clipboard.writeText(shareUrl);
-      toast.success("Profile link copied to clipboard!");
+      // Refresh friends list
+      const friendList = await friendService.getFriends();
+      setFriends(friendList);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Connection update failed");
+    } finally {
+      setConnecting(false);
     }
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile) return;
     setSaving(true);
     try {
-      await playerService.updatePlayerProfile(profile.player.id, editForm);
+      await playerService.updatePlayerProfile(id, editForm);
       toast.success("Profile updated successfully!");
       setIsEditOpen(false);
       fetchProfile();
@@ -125,51 +137,26 @@ function UserProfilePage() {
     }
   };
 
-  const handleSignOut = async () => {
-    await signOut();
-    navigate({ to: "/" });
-  };
-
   if (loading) {
     return (
-      <AppShell title="Profile">
+      <AppShell>
         <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-muted-foreground text-sm">Loading your profile...</p>
+          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-primary border-r-2"></div>
+          <p className="text-muted-foreground">Loading player profile...</p>
         </div>
       </AppShell>
     );
   }
 
-  // If user is logged in but doesn't have an active Player profile record in DB
   if (!profile) {
     return (
-      <AppShell title="Profile">
-        <div className="max-w-md mx-auto space-y-5 pb-10">
-          <Card className="p-5 border-border bg-card/60 backdrop-blur rounded-2xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-xl font-bold text-foreground">{profileName || "User"}</h1>
-                <p className="text-xs text-muted-foreground">{mobile}</p>
-              </div>
-              <Badge className="capitalize">{role}</Badge>
-            </div>
-            <div className="mt-4 pt-4 border-t border-border/40 flex justify-end">
-              <Button variant="destructive" size="sm" className="w-full gap-2 text-xs" onClick={handleSignOut}>
-                <LogOut className="h-4 w-4" /> Sign out
-              </Button>
-            </div>
-          </Card>
-
-          <Card className="p-6 border-dashed border-border/80 bg-card/20 rounded-2xl flex flex-col items-center text-center space-y-3">
-            <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-              <Info className="h-6 w-6" />
-            </div>
-            <h3 className="font-bold text-sm">No Cricket Profile Linked</h3>
-            <p className="text-xs text-muted-foreground max-w-xs">
-              Scorers can add you to matches using your registered mobile number <strong>{mobile}</strong>, which will automatically link your career stats here!
-            </p>
-          </Card>
+      <AppShell>
+        <div className="text-center py-10">
+          <h2 className="text-xl font-bold text-red-500">Player Not Found</h2>
+          <p className="text-muted-foreground mt-2">The requested player profile does not exist.</p>
+          <Button className="mt-4" onClick={() => navigate({ to: "/dashboard" })}>
+            Back to Dashboard
+          </Button>
         </div>
       </AppShell>
     );
@@ -178,7 +165,7 @@ function UserProfilePage() {
   const { player, career, tournament, recent, history, teams } = profile;
 
   return (
-    <AppShell title="Profile">
+    <AppShell>
       <div className="max-w-md mx-auto space-y-5 pb-10">
         
         {/* Profile Card Header */}
@@ -201,12 +188,11 @@ function UserProfilePage() {
                 )}
               </div>
               <div>
-                <h1 className="text-xl font-bold text-foreground flex items-center gap-1.5">
+                <h1 className="text-xl font-bold text-foreground flex items-center">
                   {player.name}
-                  <Badge className="text-[9px] h-4 uppercase tracking-wider bg-primary/10 text-primary border border-primary/20">{role}</Badge>
                 </h1>
                 <p className="text-xs text-muted-foreground">
-                  {player.team?.name || "No Team Assigned"}
+                  {player.team?.name || "No Team"}
                 </p>
                 {player.role && (
                   <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary/15 text-primary border border-primary/20">
@@ -220,9 +206,11 @@ function UserProfilePage() {
               <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground" onClick={handleShare}>
                 <Share2 className="h-4 w-4" />
               </Button>
-              <Button size="icon" variant="ghost" className="h-8 w-8 text-primary" onClick={() => setIsEditOpen(true)}>
-                <Edit className="h-4 w-4" />
-              </Button>
+              {isOwnerOrAdmin && (
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-primary" onClick={() => setIsEditOpen(true)}>
+                  <Edit className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
 
@@ -242,10 +230,25 @@ function UserProfilePage() {
             </div>
           </div>
 
-          {/* Sign Out Trigger */}
-          <Button variant="destructive" size="sm" className="w-full mt-4 gap-2 text-xs h-9" onClick={handleSignOut}>
-            <LogOut className="h-4 w-4" /> Sign out
-          </Button>
+          {/* Follow Connection Trigger */}
+          {currentUser && player.mobile && player.user_id !== currentUser.id && (
+            <Button
+              className="w-full mt-4 flex items-center justify-center space-x-1 text-xs"
+              variant={isConnected ? "secondary" : "default"}
+              disabled={connecting}
+              onClick={handleConnectionToggle}
+            >
+              {isConnected ? (
+                <>
+                  <UserMinus className="h-3 w-3 mr-1" /> Connected
+                </>
+              ) : (
+                <>
+                  <UserPlus className="h-3 w-3 mr-1" /> Connect Friend
+                </>
+              )}
+            </Button>
+          )}
         </Card>
 
         {/* Dynamic Detail Tabs */}
@@ -508,7 +511,6 @@ function UserProfilePage() {
                   onChange={e => setEditForm({ ...editForm, name: e.target.value })}
                   placeholder="Full Name"
                   required
-                  className="bg-background border-border"
                 />
               </div>
 
@@ -519,8 +521,6 @@ function UserProfilePage() {
                   value={editForm.mobile}
                   onChange={e => setEditForm({ ...editForm, mobile: e.target.value })}
                   placeholder="Mobile number"
-                  className="bg-background border-border"
-                  disabled
                 />
               </div>
 
@@ -532,7 +532,6 @@ function UserProfilePage() {
                     value={editForm.jersey_number}
                     onChange={e => setEditForm({ ...editForm, jersey_number: e.target.value })}
                     placeholder="e.g. 7"
-                    className="bg-background border-border"
                   />
                 </div>
                 <div className="space-y-1">
@@ -598,7 +597,6 @@ function UserProfilePage() {
                     type="number"
                     value={editForm.catches}
                     onChange={e => setEditForm({ ...editForm, catches: parseInt(e.target.value) || 0 })}
-                    className="bg-background border-border"
                   />
                 </div>
                 <div className="space-y-1">
@@ -608,7 +606,6 @@ function UserProfilePage() {
                     type="number"
                     value={editForm.run_outs}
                     onChange={e => setEditForm({ ...editForm, run_outs: parseInt(e.target.value) || 0 })}
-                    className="bg-background border-border"
                   />
                 </div>
               </div>

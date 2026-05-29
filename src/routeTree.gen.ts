@@ -10,12 +10,16 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TeamsRouteImport } from './routes/teams'
+import { Route as SetupRouteImport } from './routes/setup'
+import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as PlayersRouteImport } from './routes/players'
 import { Route as FriendsRouteImport } from './routes/friends'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as MatchesIndexRouteImport } from './routes/matches/index'
+import { Route as PlayersRankingsRouteImport } from './routes/players.rankings'
+import { Route as PlayersIdRouteImport } from './routes/players.$id'
 import { Route as MatchesNewRouteImport } from './routes/matches/new'
 import { Route as MatchesIdRouteImport } from './routes/matches/$id'
 import { Route as MatchesIdIndexRouteImport } from './routes/matches/$id.index'
@@ -24,6 +28,16 @@ import { Route as MatchesIdScoreRouteImport } from './routes/matches/$id.score'
 const TeamsRoute = TeamsRouteImport.update({
   id: '/teams',
   path: '/teams',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RegisterRoute = RegisterRouteImport.update({
+  id: '/register',
+  path: '/register',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProfileRoute = ProfileRouteImport.update({
@@ -56,6 +70,16 @@ const MatchesIndexRoute = MatchesIndexRouteImport.update({
   path: '/matches/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlayersRankingsRoute = PlayersRankingsRouteImport.update({
+  id: '/rankings',
+  path: '/rankings',
+  getParentRoute: () => PlayersRoute,
+} as any)
+const PlayersIdRoute = PlayersIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => PlayersRoute,
+} as any)
 const MatchesNewRoute = MatchesNewRouteImport.update({
   id: '/matches/new',
   path: '/matches/new',
@@ -81,11 +105,15 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/friends': typeof FriendsRoute
-  '/players': typeof PlayersRoute
+  '/players': typeof PlayersRouteWithChildren
   '/profile': typeof ProfileRoute
+  '/register': typeof RegisterRoute
+  '/setup': typeof SetupRoute
   '/teams': typeof TeamsRoute
   '/matches/$id': typeof MatchesIdRouteWithChildren
   '/matches/new': typeof MatchesNewRoute
+  '/players/$id': typeof PlayersIdRoute
+  '/players/rankings': typeof PlayersRankingsRoute
   '/matches/': typeof MatchesIndexRoute
   '/matches/$id/score': typeof MatchesIdScoreRoute
   '/matches/$id/': typeof MatchesIdIndexRoute
@@ -94,10 +122,14 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/friends': typeof FriendsRoute
-  '/players': typeof PlayersRoute
+  '/players': typeof PlayersRouteWithChildren
   '/profile': typeof ProfileRoute
+  '/register': typeof RegisterRoute
+  '/setup': typeof SetupRoute
   '/teams': typeof TeamsRoute
   '/matches/new': typeof MatchesNewRoute
+  '/players/$id': typeof PlayersIdRoute
+  '/players/rankings': typeof PlayersRankingsRoute
   '/matches': typeof MatchesIndexRoute
   '/matches/$id/score': typeof MatchesIdScoreRoute
   '/matches/$id': typeof MatchesIdIndexRoute
@@ -107,11 +139,15 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/friends': typeof FriendsRoute
-  '/players': typeof PlayersRoute
+  '/players': typeof PlayersRouteWithChildren
   '/profile': typeof ProfileRoute
+  '/register': typeof RegisterRoute
+  '/setup': typeof SetupRoute
   '/teams': typeof TeamsRoute
   '/matches/$id': typeof MatchesIdRouteWithChildren
   '/matches/new': typeof MatchesNewRoute
+  '/players/$id': typeof PlayersIdRoute
+  '/players/rankings': typeof PlayersRankingsRoute
   '/matches/': typeof MatchesIndexRoute
   '/matches/$id/score': typeof MatchesIdScoreRoute
   '/matches/$id/': typeof MatchesIdIndexRoute
@@ -124,9 +160,13 @@ export interface FileRouteTypes {
     | '/friends'
     | '/players'
     | '/profile'
+    | '/register'
+    | '/setup'
     | '/teams'
     | '/matches/$id'
     | '/matches/new'
+    | '/players/$id'
+    | '/players/rankings'
     | '/matches/'
     | '/matches/$id/score'
     | '/matches/$id/'
@@ -137,8 +177,12 @@ export interface FileRouteTypes {
     | '/friends'
     | '/players'
     | '/profile'
+    | '/register'
+    | '/setup'
     | '/teams'
     | '/matches/new'
+    | '/players/$id'
+    | '/players/rankings'
     | '/matches'
     | '/matches/$id/score'
     | '/matches/$id'
@@ -149,9 +193,13 @@ export interface FileRouteTypes {
     | '/friends'
     | '/players'
     | '/profile'
+    | '/register'
+    | '/setup'
     | '/teams'
     | '/matches/$id'
     | '/matches/new'
+    | '/players/$id'
+    | '/players/rankings'
     | '/matches/'
     | '/matches/$id/score'
     | '/matches/$id/'
@@ -161,8 +209,10 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
   FriendsRoute: typeof FriendsRoute
-  PlayersRoute: typeof PlayersRoute
+  PlayersRoute: typeof PlayersRouteWithChildren
   ProfileRoute: typeof ProfileRoute
+  RegisterRoute: typeof RegisterRoute
+  SetupRoute: typeof SetupRoute
   TeamsRoute: typeof TeamsRoute
   MatchesIdRoute: typeof MatchesIdRouteWithChildren
   MatchesNewRoute: typeof MatchesNewRoute
@@ -176,6 +226,20 @@ declare module '@tanstack/react-router' {
       path: '/teams'
       fullPath: '/teams'
       preLoaderRoute: typeof TeamsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/register': {
+      id: '/register'
+      path: '/register'
+      fullPath: '/register'
+      preLoaderRoute: typeof RegisterRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/profile': {
@@ -220,6 +284,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MatchesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/players/rankings': {
+      id: '/players/rankings'
+      path: '/rankings'
+      fullPath: '/players/rankings'
+      preLoaderRoute: typeof PlayersRankingsRouteImport
+      parentRoute: typeof PlayersRoute
+    }
+    '/players/$id': {
+      id: '/players/$id'
+      path: '/$id'
+      fullPath: '/players/$id'
+      preLoaderRoute: typeof PlayersIdRouteImport
+      parentRoute: typeof PlayersRoute
+    }
     '/matches/new': {
       id: '/matches/new'
       path: '/matches/new'
@@ -251,6 +329,19 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface PlayersRouteChildren {
+  PlayersIdRoute: typeof PlayersIdRoute
+  PlayersRankingsRoute: typeof PlayersRankingsRoute
+}
+
+const PlayersRouteChildren: PlayersRouteChildren = {
+  PlayersIdRoute: PlayersIdRoute,
+  PlayersRankingsRoute: PlayersRankingsRoute,
+}
+
+const PlayersRouteWithChildren =
+  PlayersRoute._addFileChildren(PlayersRouteChildren)
+
 interface MatchesIdRouteChildren {
   MatchesIdScoreRoute: typeof MatchesIdScoreRoute
   MatchesIdIndexRoute: typeof MatchesIdIndexRoute
@@ -269,8 +360,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
   FriendsRoute: FriendsRoute,
-  PlayersRoute: PlayersRoute,
+  PlayersRoute: PlayersRouteWithChildren,
   ProfileRoute: ProfileRoute,
+  RegisterRoute: RegisterRoute,
+  SetupRoute: SetupRoute,
   TeamsRoute: TeamsRoute,
   MatchesIdRoute: MatchesIdRouteWithChildren,
   MatchesNewRoute: MatchesNewRoute,

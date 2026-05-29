@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Models\Player;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -59,5 +60,57 @@ class AuthController extends Controller
             'mobile' => $user->mobile,
             'role' => $user->role,
         ]);
+    }
+
+    public function register(Request $request)
+    {
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'mobile' => [
+                'required',
+                'string',
+                'regex:/^[0-9]{10,15}$/',
+                'unique:users,mobile'
+            ],
+            'password' => 'required|string|min:6|confirmed',
+        ], [
+            'mobile.regex' => 'The mobile number must be between 10 and 15 digits.',
+            'mobile.unique' => 'This mobile number is already registered.',
+            'password.confirmed' => 'The password confirmation does not match.',
+        ]);
+
+        $user = User::create([
+            'name' => $request->name,
+            'mobile' => $request->mobile,
+            'password' => Hash::make($request->password),
+            'role' => 'user',
+        ]);
+
+        // Auto-create or link Player profile
+        $player = Player::where('mobile', $user->mobile)->first();
+        if ($player) {
+            $player->update([
+                'user_id' => $user->id,
+                'name' => $user->name,
+            ]);
+        } else {
+            Player::create([
+                'name' => $user->name,
+                'mobile' => $user->mobile,
+                'user_id' => $user->id,
+            ]);
+        }
+
+        $token = $user->createToken('criclab-token')->plainTextToken;
+
+        return response()->json([
+            'token' => $token,
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'mobile' => $user->mobile,
+                'role' => $user->role,
+            ]
+        ], 201);
     }
 }

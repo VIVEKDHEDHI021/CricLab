@@ -3,12 +3,14 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Trash2, Pencil, Radio } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 type Innings = { innings_no: number; runs: number; wickets: number; legal_balls: number; batting_team_id: string };
 
 export type MatchSummary = {
   id: string;
   status: "upcoming" | "live" | "past" | string;
+  created_by?: string;
   match_date: string;
   ground: string | null;
   match_type: string | null;
@@ -32,6 +34,8 @@ export function MatchCard({
   isAdmin?: boolean;
   onDelete?: (id: string) => void;
 }) {
+  const { user, role } = useAuth();
+  const canScore = role === "admin" || (user && m.created_by === user.id);
   const a = m.team_a?.name ?? "Team A";
   const b = m.team_b?.name ?? "Team B";
   const innA = m.innings.find((i) => i.batting_team_id === m.team_a?.id);
@@ -69,9 +73,17 @@ export function MatchCard({
           <Button variant="secondary" className="w-full">View</Button>
         </Link>
         {m.status !== "past" && (
-          <Link to="/matches/$id/score" params={{ id: m.id }} className="flex-1">
-            <Button className="w-full">{m.status === "live" ? "Continue" : "Start scoring"}</Button>
-          </Link>
+          canScore ? (
+            <Link to="/matches/$id/score" params={{ id: m.id }} className="flex-1">
+              <Button className="w-full">{m.status === "live" ? "Continue" : "Start scoring"}</Button>
+            </Link>
+          ) : (
+            m.status === "live" && (
+              <Link to="/matches/$id/score" params={{ id: m.id }} className="flex-1">
+                <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium">Live score</Button>
+              </Link>
+            )
+          )
         )}
         {isAdmin && (
           <Button variant="outline" size="icon" onClick={() => onDelete?.(m.id)} aria-label="Delete">

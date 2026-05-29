@@ -8,20 +8,30 @@ use App\Http\Controllers\MatchController;
 use App\Http\Controllers\PlayerController;
 use App\Http\Controllers\TeamController;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Broadcast;
 
 // Public routes
 Route::post('/login', [AuthController::class, 'login'])->name('login');
+Route::post('/register', [AuthController::class, 'register']);
 
 // Authenticated routes
 Route::middleware('auth:sanctum')->group(function () {
+    Broadcast::routes();
+
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
 
-    // General reads
+    // General reads and writes
     Route::get('/teams', [TeamController::class, 'index']);
+    Route::post('/teams', [TeamController::class, 'store']);
     Route::get('/players', [PlayerController::class, 'index']);
+    Route::post('/players', [PlayerController::class, 'store']);
+    Route::get('/players/rankings', [PlayerController::class, 'rankings']);
+    Route::get('/players/{id}', [PlayerController::class, 'show']);
+    Route::put('/players/{id}', [PlayerController::class, 'update']);
     Route::get('/matches', [MatchController::class, 'index']);
     Route::get('/matches/{id}', [MatchController::class, 'show']);
+    Route::post('/matches', [MatchController::class, 'store']);
 
     // Live scoring actions (allowed for scorer users)
     Route::post('/matches/{matchId}/innings', [InningsController::class, 'startInnings']);
@@ -36,13 +46,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Admin-only management
     Route::middleware('admin')->group(function () {
-        Route::post('/teams', [TeamController::class, 'store']);
         Route::delete('/teams/{id}', [TeamController::class, 'destroy']);
 
-        Route::post('/players', [PlayerController::class, 'store']);
         Route::delete('/players/{id}', [PlayerController::class, 'destroy']);
 
-        Route::post('/matches', [MatchController::class, 'store']);
         Route::delete('/matches/{id}', [MatchController::class, 'destroy']);
     });
 });

@@ -49,12 +49,10 @@ function TeamsPage() {
 
   return (
     <AppShell title="Teams">
-      {isAdmin && (
-        <div className="flex gap-2 mb-4">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="New team name" />
-          <Button onClick={add}>Add</Button>
-        </div>
-      )}
+      <div className="flex gap-2 mb-4">
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="New team name" />
+        <Button onClick={add}>Add</Button>
+      </div>
       <div className="space-y-2">
         {teams.map((t) => (
           <Card key={t.id} className="p-3 flex items-center justify-between rounded-2xl">
