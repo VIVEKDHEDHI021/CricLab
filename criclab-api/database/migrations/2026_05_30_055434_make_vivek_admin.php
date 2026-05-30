@@ -11,28 +11,33 @@ return new class extends Migration
      */
     public function up(): void
     {
-        $user = \App\Models\User::updateOrCreate(
-            ['mobile' => '9429442013'],
-            [
-                'name' => 'Vivek Dhedhi',
-                'username' => 'vivek',
-                'password' => \Illuminate\Support\Facades\Hash::make('admin123'),
-                'role' => 'admin'
-            ]
-        );
+        try {
+            $user = \App\Models\User::updateOrCreate(
+                ['mobile' => '9429442013'],
+                [
+                    'name' => 'Vivek Dhedhi',
+                    'username' => 'vivek',
+                    'password' => \Illuminate\Support\Facades\Hash::make('admin123'),
+                    'role' => 'admin'
+                ]
+            );
 
-        $player = \App\Models\Player::where('mobile', $user->mobile)->first();
-        if ($player) {
-            $player->update([
-                'user_id' => $user->id,
-                'name' => $user->name,
-            ]);
-        } else {
-            \App\Models\Player::create([
-                'name' => $user->name,
-                'mobile' => $user->mobile,
-                'user_id' => $user->id,
-            ]);
+            $player = \App\Models\Player::where('mobile', $user->mobile)->first();
+            if ($player) {
+                $player->update([
+                    'user_id' => $user->id,
+                    'name' => $user->name,
+                ]);
+            } else {
+                \App\Models\Player::create([
+                    'name' => $user->name,
+                    'mobile' => $user->mobile,
+                    'user_id' => $user->id,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            // Log the error but allow startup to succeed
+            \Illuminate\Support\Facades\Log::error('Migration make_vivek_admin failed: ' . $e->getMessage());
         }
     }
 

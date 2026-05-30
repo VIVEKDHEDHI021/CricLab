@@ -11,15 +11,20 @@ return new class extends Migration
      */
     public function up(): void
     {
-        \App\Models\User::updateOrCreate(
-            ['mobile' => '9999999999'],
-            [
-                'name' => 'Admin User',
-                'username' => 'admin',
-                'password' => \Illuminate\Support\Facades\Hash::make('admin123'),
-                'role' => 'admin'
-            ]
-        );
+        try {
+            \App\Models\User::updateOrCreate(
+                ['mobile' => '9999999999'],
+                [
+                    'name' => 'Admin User',
+                    'username' => 'admin',
+                    'password' => \Illuminate\Support\Facades\Hash::make('admin123'),
+                    'role' => 'admin'
+                ]
+            );
+        } catch (\Throwable $e) {
+            // Log the error but allow startup to succeed
+            \Illuminate\Support\Facades\Log::error('Migration ensure_admin_user_exists failed: ' . $e->getMessage());
+        }
     }
 
     /**
