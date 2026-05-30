@@ -71,13 +71,18 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/players/{id}', [PlayerController::class, 'update']);
     Route::get('/matches', [MatchController::class, 'index']);
     Route::get('/matches/{id}', [MatchController::class, 'show']);
-    Route::post('/matches', [MatchController::class, 'store']);
 
-    // Live scoring actions (allowed for scorer users)
-    Route::post('/matches/{matchId}/innings', [InningsController::class, 'startInnings']);
-    Route::post('/innings/{inningsId}/balls', [BallController::class, 'store']);
-    Route::delete('/balls/{id}', [BallController::class, 'destroy']);
-    Route::patch('/matches/{id}/end', [MatchController::class, 'end']);
+    // Scorer-only actions (admin can also do these)
+    Route::middleware('scorer')->group(function () {
+        Route::post('/matches', [MatchController::class, 'store']);
+        Route::delete('/matches/{id}', [MatchController::class, 'destroy']);
+
+        // Live scoring actions
+        Route::post('/matches/{matchId}/innings', [InningsController::class, 'startInnings']);
+        Route::post('/innings/{inningsId}/balls', [BallController::class, 'store']);
+        Route::delete('/balls/{id}', [BallController::class, 'destroy']);
+        Route::patch('/matches/{id}/end', [MatchController::class, 'end']);
+    });
 
     // Friend connections
     Route::get('/friends', [FriendController::class, 'index']);
@@ -87,9 +92,6 @@ Route::middleware('auth:sanctum')->group(function () {
     // Admin-only management
     Route::middleware('admin')->group(function () {
         Route::delete('/teams/{id}', [TeamController::class, 'destroy']);
-
         Route::delete('/players/{id}', [PlayerController::class, 'destroy']);
-
-        Route::delete('/matches/{id}', [MatchController::class, 'destroy']);
     });
 });

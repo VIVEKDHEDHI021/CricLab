@@ -33,11 +33,13 @@ function LoginPage() {
       <main className="flex-1 flex items-center justify-center px-4 py-10">
         <Card className="w-full max-w-md p-5 bg-card border-border rounded-2xl">
           <Tabs defaultValue="user" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mb-4">
-              <TabsTrigger value="user">User Login</TabsTrigger>
-              <TabsTrigger value="admin">Admin Login</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-3 mb-4">
+              <TabsTrigger value="user">User</TabsTrigger>
+              <TabsTrigger value="scorer">Scorer</TabsTrigger>
+              <TabsTrigger value="admin">Admin</TabsTrigger>
             </TabsList>
             <TabsContent value="user"><AuthForm expectedRole="user" /></TabsContent>
+            <TabsContent value="scorer"><AuthForm expectedRole="scorer" /></TabsContent>
             <TabsContent value="admin"><AuthForm expectedRole="admin" /></TabsContent>
           </Tabs>
         </Card>

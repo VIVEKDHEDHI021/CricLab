@@ -103,7 +103,7 @@ class MatchController extends Controller
     {
         $match = CricketMatch::findOrFail($id);
 
-        if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
+        if (!in_array($request->user()->role, ['admin', 'scorer']) && $match->created_by !== $request->user()->id) {
             return response()->json(['message' => 'You are not authorized to score this match.'], 403);
         }
 

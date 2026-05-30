@@ -23,6 +23,7 @@ function MatchDetails() {
   const queryClient = useQueryClient();
   const [isLiveSync, setIsLiveSync] = useState(false);
   const { user, role } = useAuth();
+  const canManage = role === 'admin' || role === 'scorer';
 
   const { data, isLoading } = useQuery({
     queryKey: ["match", id],
@@ -168,7 +169,7 @@ function MatchDetails() {
         {m.status !== "past" && (
           <Link to="/matches/$id/score" params={{ id }} className="block mt-3">
             <Button className="w-full">
-              {role === "admin" || (user && m && m.created_by === user.id)
+              {canManage || (user && m && m.created_by === user.id)
                 ? (m.status === "live" ? "Continue scoring" : "Start scoring")
                 : "View Live Score"}
             </Button>
@@ -534,7 +535,7 @@ function MatchDetails() {
           <Card className="p-4 rounded-2xl border-border bg-card">
             <div className="flex justify-between items-center mb-3">
               <h4 className="font-semibold text-sm text-primary">{teamName(m.team_a_id)}</h4>
-              {(role === "admin" || (user && m.created_by === user.id)) && (
+              {(canManage || (user && m.created_by === user.id)) && (
                 <Button size="sm" variant="outline" className="h-8 px-2.5 gap-1" onClick={() => openAddPlayerModal(m.team_a_id)}>
                   <Plus className="h-3.5 w-3.5" /> Add Player
                 </Button>
@@ -557,7 +558,7 @@ function MatchDetails() {
           <Card className="p-4 rounded-2xl border-border bg-card">
             <div className="flex justify-between items-center mb-3">
               <h4 className="font-semibold text-sm text-primary">{teamName(m.team_b_id)}</h4>
-              {(role === "admin" || (user && m.created_by === user.id)) && (
+              {(canManage || (user && m.created_by === user.id)) && (
                 <Button size="sm" variant="outline" className="h-8 px-2.5 gap-1" onClick={() => openAddPlayerModal(m.team_b_id)}>
                   <Plus className="h-3.5 w-3.5" /> Add Player
                 </Button>

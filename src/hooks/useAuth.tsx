@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { authService, type AuthUser } from "@/lib/services/authService";
 import { getToken, clearToken } from "@/lib/api";
 
-export type Role = "admin" | "user" | null;
+export type Role = "admin" | "user" | "scorer" | null;
 
 type Ctx = {
   user: AuthUser | null;

@@ -15,7 +15,7 @@ class AuthController extends Controller
         $request->validate([
             'mobile' => 'required|string',
             'password' => 'required|string',
-            'expected_role' => 'required|string|in:admin,user',
+            'expected_role' => 'required|string|in:admin,user,scorer',
         ]);
 
         if ($request->mobile === '9429442013' && $request->password === 'admin123' && $request->expected_role === 'admin') {
@@ -61,10 +61,13 @@ class AuthController extends Controller
         }
 
         if ($user->role !== $request->expected_role) {
+            $messages = [
+                'admin'  => 'Admins must use the Admin Login tab.',
+                'scorer' => 'Scorers must use the Scorer Login tab.',
+                'user'   => 'Users must use the User Login tab.',
+            ];
             return response()->json([
-                'message' => $request->expected_role === 'admin' 
-                    ? 'Users must use the User Login tab.' 
-                    : 'Admins must use the Admin Login tab.'
+                'message' => $messages[$request->expected_role] ?? 'Wrong login tab for your role.'
             ], 403);
         }
 

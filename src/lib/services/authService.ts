@@ -5,7 +5,7 @@ export type AuthUser = {
   name: string;
   username?: string;
   mobile: string;
-  role: 'admin' | 'user';
+  role: 'admin' | 'user' | 'scorer';
 };
 
 export type LoginResponse = {
