@@ -45,11 +45,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const token = getToken();
-    if (token) {
-      loadUser().finally(() => setLoading(false));
-    } else {
+    const startTime = Date.now();
+    const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
+
+    const init = async () => {
+      if (token) {
+        await loadUser();
+      }
+      const elapsed = Date.now() - startTime;
+      const remaining = 2000 - elapsed; // 2 seconds minimum display
+      if (remaining > 0) {
+        await delay(remaining);
+      }
       setLoading(false);
-    }
+    };
+
+    init();
   }, []);
 
   const refreshRole = async () => {
