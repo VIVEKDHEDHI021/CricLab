@@ -33,6 +33,23 @@ Route::get('/make-admin-manual', function () {
     }
 });
 
+Route::get('/reset-db-manual', function () {
+    try {
+        \Illuminate\Support\Facades\Artisan::call('migrate:fresh', ['--force' => true]);
+        \Illuminate\Support\Facades\Artisan::call('criclab:sync-admins');
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Live database reset and seeded successfully!',
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage(),
+        ], 500);
+    }
+});
+
 // Authenticated routes
 Route::middleware('auth:sanctum')->group(function () {
     Broadcast::routes();

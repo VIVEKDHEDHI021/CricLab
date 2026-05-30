@@ -60,7 +60,7 @@ function LiveScoring() {
     updateEchoAuth();
     setIsLiveSync(true);
 
-    const channel = echoClient.private(`matches.${id}`);
+    const channel = echoClient.channel(`matches.${id}`);
 
     channel.listen(".MatchUpdated", (data: any) => {
       setMatch(data.m);

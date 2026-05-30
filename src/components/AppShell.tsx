@@ -21,7 +21,7 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
 
     updateEchoAuth();
 
-    const channel = echoClient.private("matches");
+    const channel = echoClient.channel("matches");
 
     channel.listen(".MatchUpdated", (payload: any) => {
       const matchData = payload.m;

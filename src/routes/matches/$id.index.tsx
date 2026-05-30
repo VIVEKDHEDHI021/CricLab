@@ -30,7 +30,19 @@ function MatchDetails() {
     queryFn: () => matchService.getMatch(id),
   });
 
-  const [activeTab, setActiveTab] = useState<"live" | "scorecard" | "squads" | "overs">("live");
+  const [activeTab, setActiveTab] = useState<"live" | "scorecard" | "squads" | "overs">(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(`active_tab_${id}`);
+      if (saved === "live" || saved === "scorecard" || saved === "squads" || saved === "overs") {
+        return saved;
+      }
+    }
+    return "live";
+  });
+
+  useEffect(() => {
+    localStorage.setItem(`active_tab_${id}`, activeTab);
+  }, [activeTab, id]);
   const [selectedOversInningsId, setSelectedOversInningsId] = useState<string>("");
 
   // Player suggestion / adding states
@@ -55,7 +67,7 @@ function MatchDetails() {
     updateEchoAuth();
     setIsLiveSync(true);
 
-    const channel = echoClient.private(`matches.${id}`);
+    const channel = echoClient.channel(`matches.${id}`);
 
     channel.listen(".MatchUpdated", (updatedData: any) => {
       queryClient.setQueryData(["match", id], updatedData);
