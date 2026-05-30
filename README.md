@@ -7,7 +7,7 @@ Local cricket management and live scoring — React (TanStack Start) frontend + 
 | Service | URL |
 |---------|-----|
 | Frontend | `https://vivekdhedhi021-criclab.aidocument.workers.dev` |
-| API | `https://criclab-api.onrender.com` |
+| API | `https://criclab-api01.onrender.com` |
 
 ## Default admin login
 
@@ -59,12 +59,12 @@ Then **Manual Deploy** after pushing to GitHub.
 
 Bootstrap admin (if login still fails after deploy):
 
-- https://criclab-api.onrender.com/api/make-admin-manual  
-- or https://criclab-api.onrender.com/make-admin-manual  
+- https://criclab-api01.onrender.com/api/make-admin-manual  
+- or https://criclab-api01.onrender.com/make-admin-manual  
 
 ### Frontend (Cloudflare Workers)
 
-Build with `VITE_API_URL=https://criclab-api.onrender.com/api`
+Build with `VITE_API_URL=https://criclab-api01.onrender.com/api`
 
 ## Where user data is stored
 
