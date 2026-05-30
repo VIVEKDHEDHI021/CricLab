@@ -37,5 +37,9 @@ RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cac
 # Expose default HTTP port
 EXPOSE 80
 
-# Run migrations on startup and start Apache
-CMD php artisan migrate --force && apache2-foreground
+# Copy and set up startup script
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
+# Run migrations, seed admin accounts, and start Apache
+CMD ["/start.sh"]
