@@ -1,0 +1,52 @@
+import api from '@/lib/api';
+import type { MatchSummary } from '@/components/MatchCard';
+
+export type MatchDetail = {
+  m: any;
+  teams: any[];
+  innings: any[];
+  players: any[];
+  balls: any[];
+};
+
+export const matchService = {
+  async getMatches(): Promise<MatchSummary[]> {
+    const { data } = await api.get<MatchSummary[]>('/matches');
+    return data;
+  },
+
+  async getMatch(id: string): Promise<MatchDetail> {
+    const { data } = await api.get<MatchDetail>(`/matches/${id}`);
+    return data;
+  },
+
+  async createMatch(matchData: {
+    team_a_id: string;
+    team_b_id: string;
+    overs: number;
+    wide_run: number;
+    noball_run: number;
+    match_type: string;
+    ground: string;
+    match_date: string;
+    last_man_batting?: boolean;
+  }): Promise<{ id: string }> {
+    const { data } = await api.post<{ id: string }>('/matches', {
+      ...matchData,
+      match_date: new Date(matchData.match_date).toISOString(),
+      batting_first_id: matchData.team_a_id,
+      status: 'upcoming',
+      last_man_batting: matchData.last_man_batting ?? false,
+    });
+    return data;
+  },
+
+  async deleteMatch(id: string): Promise<void> {
+    await api.delete(`/matches/${id}`);
+  },
+
+  async endMatch(id: string): Promise<{ result: string }> {
+    const { data } = await api.patch<{ result: string }>(`/matches/${id}/end`);
+    return data;
+  },
+};
