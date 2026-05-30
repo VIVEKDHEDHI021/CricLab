@@ -50,6 +50,31 @@ Route::get('/reset-db-manual', function () {
     }
 });
 
+Route::get('/test-db-connection', function () {
+    try {
+        $connection = \Illuminate\Support\Facades\DB::connection();
+        $connection->getPdo();
+        $dbName = $connection->getDatabaseName();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Successfully connected to database!',
+            'database' => $dbName,
+            'driver' => $connection->getDriverName(),
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage(),
+            'host' => env('DB_HOST'),
+            'port' => env('DB_PORT'),
+            'database' => env('DB_DATABASE'),
+            'username' => env('DB_USERNAME'),
+            'connection_name' => env('DB_CONNECTION'),
+        ], 500);
+    }
+});
+
 // Authenticated routes
 Route::middleware('auth:sanctum')->group(function () {
     Broadcast::routes();
