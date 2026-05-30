@@ -1,0 +1,16 @@
+# Render Blueprint — API must build from criclab-api/ (Laravel + Docker)
+services:
+  - type: web
+    name: criclab-api
+    runtime: docker
+    rootDir: criclab-api
+    dockerfilePath: Dockerfile
+    dockerCommand: /start.sh
+    healthCheckPath: /up
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: LOG_CHANNEL
+        value: stderr

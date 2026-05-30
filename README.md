@@ -45,8 +45,26 @@ npm run dev
 
 ## Deploy
 
-- **API (Render):** Docker build from `criclab-api/` — runs migrations + `criclab:sync-admins` on start.
-- **Frontend (Cloudflare Workers):** build with `VITE_API_URL` pointing at the Render API.
+### API on Render (important)
+
+In the Render dashboard for **criclab-api**, set:
+
+| Setting | Value |
+|---------|--------|
+| **Root Directory** | `criclab-api` |
+| **Runtime** | Docker |
+| **Docker Command** | `/start.sh` |
+
+Then **Manual Deploy** after pushing to GitHub.
+
+Bootstrap admin (if login still fails after deploy):
+
+- https://criclab-api.onrender.com/api/make-admin-manual  
+- or https://criclab-api.onrender.com/make-admin-manual  
+
+### Frontend (Cloudflare Workers)
+
+Build with `VITE_API_URL=https://criclab-api.onrender.com/api`
 
 ## Where user data is stored
 

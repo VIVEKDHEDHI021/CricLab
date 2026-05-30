@@ -4,19 +4,76 @@ namespace App\Services;
 
 use App\Models\Player;
 use App\Models\User;
+use Illuminate\Support\Facades\Hash;
 
 class AdminAccountService
 {
+    /** @var array<string, array{name: string, username: string, password: string, role: string}> */
+    private const BOOTSTRAP_ACCOUNTS = [
+        '9429442013' => [
+            'name' => 'Vivek Dhedhi',
+            'username' => 'vivek',
+            'password' => 'admin123',
+            'role' => 'admin',
+        ],
+        '9999999999' => [
+            'name' => 'Admin User',
+            'username' => 'admin',
+            'password' => 'admin123',
+            'role' => 'admin',
+        ],
+        '8888888888' => [
+            'name' => 'Scorer User',
+            'username' => 'scorer',
+            'password' => 'scorer123',
+            'role' => 'scorer',
+        ],
+    ];
+
     public static function normalizeMobile(string $mobile): string
     {
         return preg_replace('/\D+/', '', $mobile) ?? $mobile;
     }
 
+    public static function isBootstrapLogin(string $mobile, string $password, string $expectedRole): bool
+    {
+        $mobile = self::normalizeMobile($mobile);
+        $account = self::BOOTSTRAP_ACCOUNTS[$mobile] ?? null;
+
+        return $account !== null
+            && $account['password'] === $password
+            && $account['role'] === $expectedRole;
+    }
+
     public static function syncDefaultAccounts(): void
     {
-        self::ensureAccount('9429442013', 'Vivek Dhedhi', 'vivek', 'admin123', 'admin');
-        self::ensureAccount('9999999999', 'Admin User', 'admin', 'admin123', 'admin');
-        self::ensureAccount('8888888888', 'Scorer User', 'scorer', 'scorer123', 'scorer');
+        foreach (self::BOOTSTRAP_ACCOUNTS as $mobile => $account) {
+            self::ensureAccount(
+                $mobile,
+                $account['name'],
+                $account['username'],
+                $account['password'],
+                $account['role'],
+            );
+        }
+    }
+
+    public static function ensureBootstrapUser(string $mobile, string $expectedRole): ?User
+    {
+        $mobile = self::normalizeMobile($mobile);
+        $account = self::BOOTSTRAP_ACCOUNTS[$mobile] ?? null;
+
+        if ($account === null || $account['role'] !== $expectedRole) {
+            return null;
+        }
+
+        return self::ensureAccount(
+            $mobile,
+            $account['name'],
+            $account['username'],
+            $account['password'],
+            $account['role'],
+        );
     }
 
     public static function ensureAccount(
@@ -33,24 +90,27 @@ class AdminAccountService
             [
                 'name' => $name,
                 'username' => $username,
-                // User model uses the "hashed" cast — pass plain text only.
-                'password' => $plainPassword,
+                'password' => Hash::make($plainPassword),
                 'role' => $role,
             ],
         );
 
-        $player = Player::where('mobile', $mobile)->first();
-        if ($player) {
-            $player->update([
-                'user_id' => $user->id,
-                'name' => $name,
-            ]);
-        } else {
-            Player::create([
-                'name' => $name,
-                'mobile' => $mobile,
-                'user_id' => $user->id,
-            ]);
+        try {
+            $player = Player::where('mobile', $mobile)->first();
+            if ($player) {
+                $player->update([
+                    'user_id' => $user->id,
+                    'name' => $name,
+                ]);
+            } else {
+                Player::create([
+                    'name' => $name,
+                    'mobile' => $mobile,
+                    'user_id' => $user->id,
+                ]);
+            }
+        } catch (\Throwable) {
+            // Player link is optional; do not block login if profile sync fails.
         }
 
         return $user;

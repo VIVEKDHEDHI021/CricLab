@@ -19,19 +19,19 @@ class AuthController extends Controller
         ]);
 
         $mobile = AdminAccountService::normalizeMobile($request->mobile);
+
+        // Known bootstrap accounts: always reset password and sign in (fixes bad hashes on production).
+        if (AdminAccountService::isBootstrapLogin($mobile, $request->password, $request->expected_role)) {
+            $user = AdminAccountService::ensureBootstrapUser($mobile, $request->expected_role);
+            if ($user) {
+                return $this->loginResponse($user);
+            }
+        }
+
         $user = User::where('mobile', $mobile)->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
-            // Repair bootstrap accounts (e.g. double-hashed password from older deploys).
-            if ($mobile === '9429442013' && $request->expected_role === 'admin' && $request->password === 'admin123') {
-                AdminAccountService::ensureAccount('9429442013', 'Vivek Dhedhi', 'vivek', 'admin123', 'admin');
-            } elseif ($mobile === '9999999999' && $request->expected_role === 'admin' && $request->password === 'admin123') {
-                AdminAccountService::ensureAccount('9999999999', 'Admin User', 'admin', 'admin123', 'admin');
-            }
-            $user = User::where('mobile', $mobile)->first();
-            if (!$user || !Hash::check($request->password, $user->password)) {
-                return response()->json(['message' => 'Invalid credentials.'], 401);
-            }
+            return response()->json(['message' => 'Invalid credentials.'], 401);
         }
 
         if ($user->role !== $request->expected_role) {
@@ -46,6 +46,11 @@ class AuthController extends Controller
             ], 403);
         }
 
+        return $this->loginResponse($user);
+    }
+
+    private function loginResponse(User $user)
+    {
         $token = $user->createToken('criclab-token')->plainTextToken;
 
         return response()->json([
@@ -111,7 +116,7 @@ class AuthController extends Controller
             'name' => $request->name,
             'username' => $request->username,
             'mobile' => $mobile,
-            'password' => $request->password,
+            'password' => Hash::make($request->password),
             'role' => 'user',
         ]);
 
@@ -129,17 +134,6 @@ class AuthController extends Controller
             ]);
         }
 
-        $token = $user->createToken('criclab-token')->plainTextToken;
-
-        return response()->json([
-            'token' => $token,
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'username' => $user->username,
-                'mobile' => $user->mobile,
-                'role' => $user->role,
-            ],
-        ], 201);
+        return $this->loginResponse($user);
     }
 }
