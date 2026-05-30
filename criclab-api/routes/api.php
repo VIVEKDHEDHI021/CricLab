@@ -13,6 +13,18 @@ use Illuminate\Support\Facades\Broadcast;
 // Public routes
 Route::post('/login', [AuthController::class, 'login'])->name('login');
 Route::post('/register', [AuthController::class, 'register']);
+Route::get('/debug-db', function () {
+    try {
+        $users = \App\Models\User::all(['id', 'name', 'mobile', 'role', 'username']);
+        $migrations = \Illuminate\Support\Facades\DB::table('migrations')->get();
+        return response()->json([
+            'users' => $users,
+            'migrations' => $migrations
+        ]);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()]);
+    }
+});
 
 // Authenticated routes
 Route::middleware('auth:sanctum')->group(function () {
