@@ -16,6 +16,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
+    console.error('Axios Interceptor Error:', err.response?.status, err.config?.url, err.message);
     if (err.response?.status === 401 && !err.config?.url?.includes('/login') && !err.config?.url?.includes('/register')) {
       localStorage.removeItem('criclab_token');
       window.location.href = '/';

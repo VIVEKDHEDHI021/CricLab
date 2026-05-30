@@ -64,6 +64,75 @@ class PlayerController extends Controller
         return response()->json($result);
     }
 
+    public function search(Request $request)
+    {
+        $query = $request->query('query');
+        if (!$query) {
+            return response()->json([], 200);
+        }
+
+        $players = Player::where('mobile', $query)
+            ->orWhere('user_id', $query)
+            ->orWhere('name', 'like', "%{$query}%")
+            ->orWhereHas('user', function($q) use ($query) {
+                $q->where('mobile', $query)
+                  ->orWhere('id', $query)
+                  ->orWhere('username', 'like', "%{$query}%")
+                  ->orWhere('name', 'like', "%{$query}%");
+            })
+            ->with('team')
+            ->get();
+
+        $pastMatchIds = CricketMatch::where('status', 'past')->pluck('id')->all();
+        $balls = Ball::whereIn('match_id', $pastMatchIds)->get();
+
+        $result = [];
+        foreach ($players as $p) {
+            $playerIds = $p->mobile ? Player::where('mobile', $p->mobile)->pluck('id')->all() : [$p->id];
+
+            $bat = $balls->whereIn('batter_id', $playerIds);
+            $bowl = $balls->whereIn('bowler_id', $playerIds);
+
+            $runs = $bat->sum('runs');
+            $facedBalls = $bat->where('is_legal', true)->count();
+            $sr = $facedBalls ? number_format(($runs / $facedBalls) * 100, 1) : '—';
+
+            $wickets = $bowl->where('is_wicket', true)->count();
+            $runsConceded = $bowl->sum('runs') + $bowl->sum('extra_runs');
+            $legalBowl = $bowl->where('is_legal', true)->count();
+            $overs = $legalBowl / 6;
+            $econ = $overs > 0 ? number_format($runsConceded / $overs, 2) : '—';
+
+            $matchIds = collect([]);
+            foreach ($bat as $b) {
+                $matchIds->push($b->match_id);
+            }
+            foreach ($bowl as $b) {
+                $matchIds->push($b->match_id);
+            }
+            $matchesCount = $matchIds->unique()->count();
+
+            $result[] = [
+                'id' => $p->id,
+                'name' => $p->name,
+                'team_id' => $p->team_id,
+                'mobile' => $p->mobile,
+                'user_id' => $p->user_id,
+                'avatar' => $p->avatar,
+                'role' => $p->role,
+                'stats' => [
+                    'matches' => $matchesCount,
+                    'runs' => $runs,
+                    'wickets' => $wickets,
+                    'sr' => $sr,
+                    'econ' => $econ,
+                ]
+            ];
+        }
+
+        return response()->json($result);
+    }
+
     public function store(Request $request)
     {
         $request->validate([

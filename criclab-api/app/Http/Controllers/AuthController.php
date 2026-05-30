@@ -39,6 +39,7 @@ class AuthController extends Controller
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
+                'username' => $user->username,
                 'mobile' => $user->mobile,
                 'role' => $user->role,
             ]
@@ -57,6 +58,7 @@ class AuthController extends Controller
         return response()->json([
             'id' => $user->id,
             'name' => $user->name,
+            'username' => $user->username,
             'mobile' => $user->mobile,
             'role' => $user->role,
         ]);
@@ -66,6 +68,14 @@ class AuthController extends Controller
     {
         $request->validate([
             'name' => 'required|string|max:255',
+            'username' => [
+                'required',
+                'string',
+                'min:3',
+                'max:50',
+                'alpha_dash',
+                'unique:users,username'
+            ],
             'mobile' => [
                 'required',
                 'string',
@@ -74,6 +84,8 @@ class AuthController extends Controller
             ],
             'password' => 'required|string|min:6|confirmed',
         ], [
+            'username.unique' => 'This username is already taken.',
+            'username.alpha_dash' => 'The username may only contain letters, numbers, dashes, and underscores.',
             'mobile.regex' => 'The mobile number must be between 10 and 15 digits.',
             'mobile.unique' => 'This mobile number is already registered.',
             'password.confirmed' => 'The password confirmation does not match.',
@@ -81,6 +93,7 @@ class AuthController extends Controller
 
         $user = User::create([
             'name' => $request->name,
+            'username' => $request->username,
             'mobile' => $request->mobile,
             'password' => Hash::make($request->password),
             'role' => 'user',
@@ -108,6 +121,7 @@ class AuthController extends Controller
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
+                'username' => $user->username,
                 'mobile' => $user->mobile,
                 'role' => $user->role,
             ]

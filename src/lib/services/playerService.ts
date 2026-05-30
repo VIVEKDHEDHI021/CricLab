@@ -118,5 +118,10 @@ export const playerService = {
     const { data } = await api.get<PlayerRankings>('/players/rankings');
     return data;
   },
+
+  async searchPlayers(query: string): Promise<Player[]> {
+    const { data } = await api.get<Player[]>('/players/search', { params: { query } });
+    return data;
+  },
 };
 

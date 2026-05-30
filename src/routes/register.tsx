@@ -24,6 +24,7 @@ function RegisterPage() {
 
   const [form, setForm] = useState({
     name: "",
+    username: "",
     mobile: "",
     password: "",
     password_confirmation: "",
@@ -34,12 +35,21 @@ function RegisterPage() {
     e.preventDefault();
 
     const name = form.name.trim();
+    const username = form.username.trim().toLowerCase();
     const mobile = form.mobile.trim();
     const password = form.password;
     const confirm = form.password_confirmation;
 
-    if (!name || !mobile || !password || !confirm) {
+    if (!name || !username || !mobile || !password || !confirm) {
       return toast.error("All fields are required");
+    }
+
+    if (username.length < 3) {
+      return toast.error("Username must be at least 3 characters");
+    }
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+      return toast.error("Username can only contain letters, numbers, underscores, and hyphens");
     }
 
     if (!/^[0-9]{10,15}$/.test(mobile)) {
@@ -56,7 +66,7 @@ function RegisterPage() {
 
     setBusy(true);
     try {
-      const { token } = await authService.register(name, mobile, password, confirm);
+      const { token } = await authService.register(name, mobile, username, password, confirm);
       setToken(token);
       updateEchoAuth();
       await refreshRole();
@@ -99,6 +109,18 @@ function RegisterPage() {
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="John Doe"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="username">Unique Username</Label>
+              <Input
+                id="username"
+                type="text"
+                autoComplete="username"
+                disabled={busy}
+                value={form.username}
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                placeholder="john_doe"
               />
             </div>
             <div className="space-y-1">

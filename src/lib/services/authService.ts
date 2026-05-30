@@ -3,6 +3,7 @@ import api from '@/lib/api';
 export type AuthUser = {
   id: string;
   name: string;
+  username?: string;
   mobile: string;
   role: 'admin' | 'user';
 };
@@ -18,10 +19,11 @@ export const authService = {
     return data;
   },
 
-  async register(name: string, mobile: string, password: string, passwordConfirmation: string): Promise<LoginResponse> {
+  async register(name: string, mobile: string, username: string, password: string, passwordConfirmation: string): Promise<LoginResponse> {
     const { data } = await api.post<LoginResponse>('/register', {
       name,
       mobile,
+      username,
       password,
       password_confirmation: passwordConfirmation,
     });
