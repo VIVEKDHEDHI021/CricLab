@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Player;
 use App\Models\Ball;
 use App\Models\CricketMatch;
-use App\Models\User;
+use App\Models\Account;
 use Illuminate\Http\Request;
 
 class PlayerController extends Controller
@@ -143,7 +143,7 @@ class PlayerController extends Controller
 
         $user = null;
         if ($request->mobile) {
-            $user = User::where('mobile', $request->mobile)->first();
+            $user = \App\Models\Account::where('mobile', $request->mobile)->first();
         }
 
         $player = Player::create([
@@ -347,14 +347,14 @@ class PlayerController extends Controller
         ]));
 
         if ($player->user_id && $request->has('name')) {
-            $matchingUser = User::find($player->user_id);
+            $matchingUser = \App\Models\Account::find($player->user_id);
             if ($matchingUser) {
                 $matchingUser->update(['name' => $request->name]);
             }
         }
 
         if ($request->has('mobile') && $request->mobile) {
-            $matchingUser = User::where('mobile', $request->mobile)->first();
+            $matchingUser = \App\Models\Account::where('mobile', $request->mobile)->first();
             if ($matchingUser) {
                 $player->update(['user_id' => $matchingUser->id]);
             }

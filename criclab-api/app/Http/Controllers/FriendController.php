@@ -32,7 +32,7 @@ class FriendController extends Controller
         ]);
 
         $currentUser = $request->user();
-        $friendUser = User::where('mobile', $request->mobile)->first();
+        $friendUser = \App\Models\Account::where('mobile', $request->mobile)->first();
 
         if (!$friendUser) {
             return response()->json(['message' => 'No user with that mobile.'], 404);

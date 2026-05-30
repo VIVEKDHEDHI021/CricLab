@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\Account;
 use App\Models\Player;
-use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 
 class AdminAccountService
@@ -58,7 +58,7 @@ class AdminAccountService
         }
     }
 
-    public static function ensureBootstrapUser(string $mobile, string $expectedRole): ?User
+    public static function ensureBootstrapAccount(string $mobile, string $expectedRole): ?Account
     {
         $mobile = self::normalizeMobile($mobile);
         $account = self::BOOTSTRAP_ACCOUNTS[$mobile] ?? null;
@@ -82,10 +82,10 @@ class AdminAccountService
         string $username,
         string $plainPassword,
         string $role,
-    ): User {
+    ): Account {
         $mobile = self::normalizeMobile($mobile);
 
-        $user = User::updateOrCreate(
+        $account = Account::updateOrCreate(
             ['mobile' => $mobile],
             [
                 'name' => $name,
@@ -99,20 +99,20 @@ class AdminAccountService
             $player = Player::where('mobile', $mobile)->first();
             if ($player) {
                 $player->update([
-                    'user_id' => $user->id,
+                    'user_id' => $account->id,
                     'name' => $name,
                 ]);
             } else {
                 Player::create([
                     'name' => $name,
                     'mobile' => $mobile,
-                    'user_id' => $user->id,
+                    'user_id' => $account->id,
                 ]);
             }
         } catch (\Throwable) {
-            // Player link is optional; do not block login if profile sync fails.
+            // Player link is optional.
         }
 
-        return $user;
+        return $account;
     }
 }

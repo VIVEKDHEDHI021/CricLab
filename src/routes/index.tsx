@@ -9,6 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
@@ -40,7 +47,10 @@ function LoginPage() {
             </TabsList>
             <TabsContent value="user"><AuthForm expectedRole="user" /></TabsContent>
             <TabsContent value="scorer"><AuthForm expectedRole="scorer" /></TabsContent>
-            <TabsContent value="admin"><AuthForm expectedRole="admin" /></TabsContent>
+            <TabsContent value="admin">
+              <AuthForm expectedRole="admin" />
+              <AdminRegisterDialog />
+            </TabsContent>
           </Tabs>
         </Card>
       </main>
@@ -77,27 +87,165 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
   return (
     <form onSubmit={submit} className="space-y-3">
       <div className="space-y-1">
-        <Label htmlFor="mobile">Mobile number</Label>
-        <Input id="mobile" inputMode="tel" autoComplete="tel" value={mobile}
-          onChange={(e) => setMobile(e.target.value)} placeholder="9876543210" />
+        <Label htmlFor={`mobile-${expectedRole}`}>Mobile number</Label>
+        <Input
+          id={`mobile-${expectedRole}`}
+          inputMode="tel"
+          autoComplete="tel"
+          value={mobile}
+          onChange={(e) => setMobile(e.target.value)}
+          placeholder="9876543210"
+        />
       </div>
       <div className="space-y-1">
-        <Label htmlFor="pw">Password</Label>
-        <Input id="pw" type="password" autoComplete="current-password"
-          value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Label htmlFor={`pw-${expectedRole}`}>Password</Label>
+        <Input
+          id={`pw-${expectedRole}`}
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
       </div>
       <Button type="submit" className="w-full" disabled={busy}>
         {busy ? "Please wait…" : "Sign in"}
       </Button>
       {expectedRole === "user" && (
         <div className="space-y-2 pt-2">
-          <p className="text-[11px] text-muted-foreground text-center">Password reset is handled by an admin.</p>
+          <p className="text-[11px] text-muted-foreground text-center">
+            Password reset is handled by an admin.
+          </p>
           <div className="text-center text-xs border-t border-border/40 pt-2">
             <span className="text-muted-foreground">New to CricLab? </span>
-            <Link to="/register" className="text-primary hover:underline font-semibold">Register here</Link>
+            <Link to="/register" className="text-primary hover:underline font-semibold">
+              Register here
+            </Link>
           </div>
         </div>
       )}
     </form>
+  );
+}
+
+function AdminRegisterDialog() {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const nav = useNavigate();
+  const { refreshRole } = useAuth();
+  const [form, setForm] = useState({
+    name: "",
+    username: "",
+    mobile: "",
+    password: "",
+    password_confirmation: "",
+    developer_password: "",
+  });
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = form.name.trim();
+    const username = form.username.trim().toLowerCase();
+    const mobile = form.mobile.trim();
+    if (!name || !username || !mobile || !form.password || !form.developer_password) {
+      return toast.error("All fields are required");
+    }
+    if (form.password !== form.password_confirmation) {
+      return toast.error("Passwords do not match");
+    }
+    setBusy(true);
+    try {
+      const { token } = await authService.registerAdmin(
+        name,
+        mobile,
+        username,
+        form.password,
+        form.password_confirmation,
+        form.developer_password,
+      );
+      setToken(token);
+      updateEchoAuth();
+      await refreshRole();
+      toast.success("Admin account created");
+      setOpen(false);
+      nav({ to: "/dashboard" });
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Registration failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button type="button" variant="outline" className="w-full mt-3">
+          Register new admin
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Register admin account</DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground">
+          You need the developer password set on the server (Render env:{" "}
+          <code className="text-primary">ADMIN_REGISTRATION_PASSWORD</code>).
+        </p>
+        <form onSubmit={submit} className="space-y-3 mt-2">
+          <div className="space-y-1">
+            <Label>Full name</Label>
+            <Input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="Your name"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Username</Label>
+            <Input
+              value={form.username}
+              onChange={(e) => setForm({ ...form, username: e.target.value })}
+              placeholder="admin_username"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Mobile number</Label>
+            <Input
+              inputMode="tel"
+              value={form.mobile}
+              onChange={(e) => setForm({ ...form, mobile: e.target.value })}
+              placeholder="9429442013"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Password</Label>
+            <Input
+              type="password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Confirm password</Label>
+            <Input
+              type="password"
+              value={form.password_confirmation}
+              onChange={(e) => setForm({ ...form, password_confirmation: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Developer password</Label>
+            <Input
+              type="password"
+              value={form.developer_password}
+              onChange={(e) => setForm({ ...form, developer_password: e.target.value })}
+              placeholder="From server config"
+            />
+          </div>
+          <Button type="submit" className="w-full" disabled={busy}>
+            {busy ? "Creating…" : "Create admin account"}
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

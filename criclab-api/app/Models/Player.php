@@ -18,6 +18,6 @@ class Player extends Model
 
     public function user()
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(Account::class, 'user_id');
     }
 }

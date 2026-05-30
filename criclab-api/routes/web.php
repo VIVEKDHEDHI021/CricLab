@@ -15,7 +15,7 @@ Route::get('/', function () {
 Route::get('/make-admin-manual', function () {
     try {
         AdminAccountService::syncDefaultAccounts();
-        $user = \App\Models\User::where('mobile', '9429442013')->first();
+        $user = \App\Models\Account::where('mobile', '9429442013')->first();
 
         return response()->json([
             'status' => 'success',

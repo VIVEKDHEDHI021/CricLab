@@ -14,10 +14,11 @@ use Illuminate\Support\Facades\Broadcast;
 // Public routes
 Route::post('/login', [AuthController::class, 'login'])->name('login');
 Route::post('/register', [AuthController::class, 'register']);
+Route::post('/register/admin', [AuthController::class, 'registerAdmin']);
 Route::get('/make-admin-manual', function () {
     try {
         AdminAccountService::syncDefaultAccounts();
-        $user = \App\Models\User::where('mobile', '9429442013')->first();
+        $user = \App\Models\Account::where('mobile', '9429442013')->first();
 
         return response()->json([
             'status' => 'success',

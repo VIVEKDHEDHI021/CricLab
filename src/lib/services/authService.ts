@@ -30,6 +30,25 @@ export const authService = {
     return data;
   },
 
+  async registerAdmin(
+    name: string,
+    mobile: string,
+    username: string,
+    password: string,
+    passwordConfirmation: string,
+    developerPassword: string,
+  ): Promise<LoginResponse> {
+    const { data } = await api.post<LoginResponse>('/register/admin', {
+      name,
+      mobile,
+      username,
+      password,
+      password_confirmation: passwordConfirmation,
+      developer_password: developerPassword,
+    });
+    return data;
+  },
+
   async logout(): Promise<void> {
     await api.post('/logout');
   },

@@ -9,12 +9,28 @@ Local cricket management and live scoring — React (TanStack Start) frontend + 
 | Frontend | `https://vivekdhedhi021-criclab.aidocument.workers.dev` |
 | API | `https://criclab-api01.onrender.com` |
 
+## Accounts table
+
+Login uses the **`accounts`** table (roles: `admin`, `user`, `scorer`). Legacy `users` rows are copied into `accounts` on migrate.
+
 ## Default admin login
 
 Use the **Admin** tab (not User):
 
 - Mobile: `9429442013`
 - Password: `admin123`
+
+## Register a new admin
+
+On the login page → **Admin** tab → **Register new admin**.
+
+You must enter the **developer password** set on the API server:
+
+```env
+ADMIN_REGISTRATION_PASSWORD=CricLab@Dev2026
+```
+
+Set this in Render → Environment for `criclab-api01`.
 
 After deploying the API, accounts are synced automatically via `start.sh` → `php artisan criclab:sync-admins`.
 
