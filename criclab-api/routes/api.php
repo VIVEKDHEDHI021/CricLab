@@ -75,6 +75,52 @@ Route::get('/test-db-connection', function () {
     }
 });
 
+Route::get('/test-register-error', function () {
+    try {
+        DB::beginTransaction();
+
+        $username = 'test_' . time();
+        $mobile = '9' . str_pad(rand(0, 999999999), 9, '0', STR_PAD_LEFT);
+        
+        $account = \App\Models\Account::create([
+            'name' => 'Test User ' . time(),
+            'username' => $username,
+            'mobile' => $mobile,
+            'password' => Hash::make('password123'),
+            'role' => 'user',
+        ]);
+
+        $player = \App\Models\Player::where('mobile', $account->mobile)->first();
+        if ($player) {
+            $player->update([
+                'user_id' => $account->id,
+                'name' => $account->name,
+            ]);
+        } else {
+            \App\Models\Player::create([
+                'name' => $account->name,
+                'mobile' => $account->mobile,
+                'user_id' => $account->id,
+            ]);
+        }
+
+        DB::rollBack();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Simulated registration completed successfully!',
+            'account' => $account,
+        ]);
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+        ], 500);
+    }
+});
+
 // Authenticated routes
 Route::middleware('auth:sanctum')->group(function () {
     Broadcast::routes();
