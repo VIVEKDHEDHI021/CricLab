@@ -652,7 +652,22 @@ function LiveScoring() {
           </div>
           <div className="grid grid-cols-3 gap-2 mb-2">
             <Button variant="outline" onClick={() => addBall("wide")} disabled={isInningsOver}>Wide</Button>
-            <Button variant="outline" onClick={() => addBall("no_ball", 0)} disabled={isInningsOver}>No ball</Button>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                const runsStr = prompt("Enter runs scored off the bat on this No Ball (0, 1, 2, 3, 4, 6):", "0");
+                if (runsStr === null) return; // user cancelled
+                const r = parseInt(runsStr, 10);
+                if ([0, 1, 2, 3, 4, 6].includes(r)) {
+                  addBall("no_ball", r);
+                } else {
+                  toast.error("Invalid runs. Please enter 0, 1, 2, 3, 4, or 6.");
+                }
+              }} 
+              disabled={isInningsOver}
+            >
+              No ball
+            </Button>
             <Button variant="outline" onClick={() => addBall("bye", 1)} disabled={isInningsOver}>Bye</Button>
             <Button variant="outline" onClick={() => addBall("leg_bye", 1)} disabled={isInningsOver}>Leg bye</Button>
             <Button variant="destructive" onClick={() => addBall("wicket")} disabled={isInningsOver}>Wicket</Button>
