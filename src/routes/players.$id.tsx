@@ -201,17 +201,6 @@ function PlayerProfilePage() {
                 )}
               </div>
             </div>
-
-            <div className="flex space-x-1">
-              <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground" onClick={handleShare}>
-                <Share2 className="h-4 w-4" />
-              </Button>
-              {isOwnerOrAdmin && (
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-primary" onClick={() => setIsEditOpen(true)}>
-                  <Edit className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
           </div>
 
           {/* Quick Stats Summary Grid */}
