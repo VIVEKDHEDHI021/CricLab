@@ -139,7 +139,7 @@ function PlayerProfilePage() {
 
   if (loading) {
     return (
-      <AppShell>
+      <AppShell title="Players">
         <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
           <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-primary border-r-2"></div>
           <p className="text-muted-foreground">Loading player profile...</p>
@@ -150,7 +150,7 @@ function PlayerProfilePage() {
 
   if (!profile) {
     return (
-      <AppShell>
+      <AppShell title="Players">
         <div className="text-center py-10">
           <h2 className="text-xl font-bold text-red-500">Player Not Found</h2>
           <p className="text-muted-foreground mt-2">The requested player profile does not exist.</p>
@@ -165,7 +165,7 @@ function PlayerProfilePage() {
   const { player, career, tournament, recent, history, teams } = profile;
 
   return (
-    <AppShell>
+    <AppShell title="Players">
       <div className="max-w-md mx-auto space-y-5 pb-10">
         
         {/* Profile Card Header */}
