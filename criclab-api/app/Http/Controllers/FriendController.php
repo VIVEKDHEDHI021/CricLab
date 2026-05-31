@@ -14,10 +14,21 @@ class FriendController extends Controller
         $friends = Friend::where('user_id', $userId)->with('friend')->get();
 
         return response()->json($friends->map(function ($f) {
+            $playerId = null;
+            if ($f->friend) {
+                $player = \App\Models\Player::where('user_id', $f->friend->id)->first();
+                if (!$player && $f->friend->mobile) {
+                    $player = \App\Models\Player::where('mobile', $f->friend->mobile)->first();
+                }
+                if ($player) {
+                    $playerId = $player->id;
+                }
+            }
+
             return [
                 'id' => $f->id,
                 'profile' => $f->friend ? [
-                    'id' => $f->friend->id,
+                    'id' => $playerId ?: $f->friend->id,
                     'name' => $f->friend->name,
                     'mobile' => $f->friend->mobile,
                 ] : null,
@@ -55,10 +66,16 @@ class FriendController extends Controller
             'friend_user_id' => $friendUser->id,
         ]);
 
+        $player = \App\Models\Player::where('user_id', $friendUser->id)->first();
+        if (!$player && $friendUser->mobile) {
+            $player = \App\Models\Player::where('mobile', $friendUser->mobile)->first();
+        }
+        $playerId = $player ? $player->id : null;
+
         return response()->json([
             'id' => $friendship->id,
             'profile' => [
-                'id' => $friendUser->id,
+                'id' => $playerId ?: $friendUser->id,
                 'name' => $friendUser->name,
                 'mobile' => $friendUser->mobile,
             ]
