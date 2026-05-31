@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { Home, ListChecks, Users, User as UserIcon, Plus, Shield } from "lucide-react";
+import { Home, ListChecks, Users, User as UserIcon, Plus, Shield, Trophy } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -71,7 +71,7 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
   const tabs = [
     { to: "/dashboard", label: "Home", icon: Home },
     { to: "/matches", label: "Matches", icon: ListChecks },
-    { to: "/teams", label: "Teams", icon: Shield },
+    { to: "/players/rankings", label: "Leaderboard", icon: Trophy },
     { to: "/friends", label: "Friends", icon: Users },
     { to: "/profile", label: "Profile", icon: UserIcon },
   ];
