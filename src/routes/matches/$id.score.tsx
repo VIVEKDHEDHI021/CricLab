@@ -72,7 +72,7 @@ function LiveScoring() {
 
     return () => {
       channel.stopListening(".MatchUpdated");
-      echoClient.leave(`matches.${id}`);
+      echoClient?.leave(`matches.${id}`);
       setIsLiveSync(false);
     };
   }, [id]);
@@ -118,7 +118,8 @@ function LiveScoring() {
   }, [currentInn, match, battingPlayers, firstInnings]);
 
   useEffect(() => {
-    if (isLastManRemaining) {
+    if (activeBattingPlayers.length === 1) {
+      setIsSoloPlay(true);
       const loneBatsmanId = activeBattingPlayers[0].id;
       if (striker !== loneBatsmanId) {
         setStriker(loneBatsmanId);
@@ -127,7 +128,7 @@ function LiveScoring() {
         setNonStriker("");
       }
     }
-  }, [isLastManRemaining, activeBattingPlayers, striker, nonStriker]);
+  }, [activeBattingPlayers, striker, nonStriker]);
 
   const isOverStarted = useMemo(() => {
     if (!currentInn) return false;
