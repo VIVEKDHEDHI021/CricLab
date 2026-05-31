@@ -119,16 +119,20 @@ function LiveScoring() {
 
   useEffect(() => {
     if (activeBattingPlayers.length === 1) {
-      setIsSoloPlay(true);
-      const loneBatsmanId = activeBattingPlayers[0].id;
-      if (striker !== loneBatsmanId) {
-        setStriker(loneBatsmanId);
+      if (!isSoloPlay) {
+        setIsSoloPlay(true);
       }
-      if (nonStriker !== "") {
-        setNonStriker("");
+      const loneBatsmanId = activeBattingPlayers[0]?.id;
+      if (loneBatsmanId) {
+        if (striker !== loneBatsmanId) {
+          setStriker(loneBatsmanId);
+        }
+        if (nonStriker !== "") {
+          setNonStriker("");
+        }
       }
     }
-  }, [activeBattingPlayers, striker, nonStriker]);
+  }, [activeBattingPlayers.length, activeBattingPlayers[0]?.id, striker, nonStriker, isSoloPlay]);
 
   const isOverStarted = useMemo(() => {
     if (!currentInn) return false;
