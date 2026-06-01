@@ -14,6 +14,7 @@ export type Ball = {
   extra_runs: number;
   extra_type: string | null;
   is_wicket: boolean;
+  wicket_type: string | null;
   is_legal: boolean;
 };
 
@@ -32,6 +33,7 @@ export const ballService = {
       extra_runs: number;
       extra_type: string | null;
       is_wicket: boolean;
+      wicket_type?: string | null;
       is_legal: boolean;
     }
   ): Promise<Ball> {

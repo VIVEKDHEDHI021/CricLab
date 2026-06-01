@@ -25,6 +25,7 @@ class BallController extends Controller
             'extra_runs' => 'required|integer',
             'extra_type' => 'nullable|string',
             'is_wicket' => 'required|boolean',
+            'wicket_type' => 'nullable|string',
             'is_legal' => 'required|boolean',
         ]);
 
@@ -48,6 +49,7 @@ class BallController extends Controller
             'extra_runs' => $request->extra_runs,
             'extra_type' => $request->extra_type,
             'is_wicket' => $request->is_wicket,
+            'wicket_type' => $request->wicket_type,
             'is_legal' => $request->is_legal,
         ]);
 

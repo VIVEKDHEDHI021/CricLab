@@ -13,6 +13,13 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { echoClient, updateEchoAuth } from "@/lib/echo";
 import { useAuth } from "@/hooks/useAuth";
@@ -42,6 +49,9 @@ function LiveScoring() {
   const [bowler, setBowler] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [isSoloPlay, setIsSoloPlay] = useState(false);
+  const [isWicketDialogOpen, setIsWicketDialogOpen] = useState(false);
+  const [wicketType, setWicketType] = useState<"regular" | "run_out">("regular");
+  const [dismissedPlayerId, setDismissedPlayerId] = useState<string>("");
 
   const canScore = role === "admin" || (user && match && match.created_by === user.id);
   const playerName = (pid: string) => players.find((p) => p.id === pid)?.name ?? "—";
@@ -222,14 +232,17 @@ function LiveScoring() {
     }
   }, [innBalls, outBatterIds, striker, nonStriker, bowler, isLastManRemaining, isSoloPlay]);
 
-  const allPlayersSelected = useMemo(() => {
-    const isLastManActive = !!(
+  const isLastManActive = useMemo(() => {
+    return !!(
       match?.last_man_batting &&
       currentInn &&
       currentInn.wickets >= (battingPlayers.length > 0 ? battingPlayers.length - 1 : 10)
     );
+  }, [match, currentInn, battingPlayers]);
+
+  const allPlayersSelected = useMemo(() => {
     return !!(striker && (isSoloPlay || isLastManActive || nonStriker) && bowler);
-  }, [striker, nonStriker, bowler, match, currentInn, battingPlayers, isSoloPlay]);
+  }, [striker, nonStriker, bowler, isSoloPlay, isLastManActive]);
 
   const isLocked = isOverStarted && allPlayersSelected && !unlocked;
 
@@ -337,6 +350,29 @@ function LiveScoring() {
     };
   }, [currentInn, firstInnings, match, teamName]);
 
+  const disabledBowlers = useMemo(() => {
+    const disabled = new Set<string>();
+    if (!currentInn || !currentInn.legal_balls) return disabled;
+
+    const totalLegal = currentInn.legal_balls;
+    const currentOverNo = Math.floor(totalLegal / 6);
+
+    const legalBallsOfInnings = innBalls.filter((b) => b.is_legal);
+    if (legalBallsOfInnings.length > 0) {
+      const lastLegalBall = legalBallsOfInnings[legalBallsOfInnings.length - 1];
+
+      if (totalLegal % 6 === 0) {
+        disabled.add(lastLegalBall.bowler_id);
+      } else {
+        const prevOverLastBallIndex = currentOverNo * 6 - 1;
+        if (prevOverLastBallIndex >= 0 && prevOverLastBallIndex < legalBallsOfInnings.length) {
+          disabled.add(legalBallsOfInnings[prevOverLastBallIndex].bowler_id);
+        }
+      }
+    }
+    return disabled;
+  }, [currentInn, innBalls]);
+
   const startInnings = async (battingTeamId: string) => {
     if (!match) return;
     const bowlingTeamId = battingTeamId === match.team_a_id ? match.team_b_id : match.team_a_id;
@@ -364,15 +400,103 @@ function LiveScoring() {
     }
   };
 
+  const handleWicketClick = () => {
+    if (!currentInn) return toast.error("Start an innings first");
+
+    if (!striker || !bowler) return toast.error("Select striker and bowler");
+    if (!isSoloPlay && !isLastManActive && (!nonStriker || nonStriker === striker)) {
+      return toast.error("Select a distinct non-striker");
+    }
+
+    if (isSoloPlay || isLastManActive) {
+      executeWicketBall("regular", striker);
+    } else {
+      setWicketType("regular");
+      setDismissedPlayerId(striker);
+      setIsWicketDialogOpen(true);
+    }
+  };
+
+  const executeWicketBall = async (wType: "regular" | "run_out", dismissedId: string) => {
+    setIsWicketDialogOpen(false);
+    if (!currentInn) return toast.error("Start an innings first");
+
+    if (!striker || !bowler) return toast.error("Select striker and bowler");
+    if (!isSoloPlay && !isLastManActive && (!nonStriker || nonStriker === striker)) {
+      return toast.error("Select a distinct non-striker");
+    }
+
+    const actualBatterId = dismissedId;
+    const actualNonStrikerId = dismissedId === striker ? nonStriker : striker;
+
+    const ballIndex = innBalls.length;
+    const legalCount = currentInn.legal_balls;
+    const overNo = Math.floor(legalCount / 6);
+    const ballInOver = (legalCount % 6) + 1;
+
+    try {
+      await ballService.addBall(currentInn.id, {
+        match_id: id,
+        ball_index: ballIndex,
+        over_number: overNo,
+        ball_in_over: ballInOver,
+        batter_id: actualBatterId,
+        non_striker_id: isSoloPlay || isLastManActive ? null : actualNonStrikerId,
+        bowler_id: bowler,
+        runs: 0,
+        extra_runs: 0,
+        extra_type: null,
+        is_wicket: true,
+        wicket_type: wType,
+        is_legal: true,
+      });
+
+      if (dismissedId === striker) {
+        setStriker("");
+        toast.info("Wicket! Select new batsman");
+      } else {
+        setNonStriker("");
+        toast.info("Wicket! Select new non-striker");
+      }
+
+      const newLegal = currentInn.legal_balls + 1;
+      if (newLegal % 6 === 0) {
+        if (!isSoloPlay && !isLastManActive) {
+          const currentS = dismissedId === striker ? "" : striker;
+          const currentNS = dismissedId === striker ? nonStriker : "";
+          setStriker(currentNS);
+          setNonStriker(currentS);
+        }
+        setBowler("");
+        toast.success("End of over");
+      }
+
+      const newWickets = currentInn.wickets + 1;
+      const maxWickets =
+        battingPlayers.length > 0
+          ? match.last_man_batting
+            ? battingPlayers.length
+            : battingPlayers.length - 1
+          : 10;
+      if (newLegal >= match.overs * 6 || newWickets >= maxWickets || newWickets >= 10) {
+        toast.success("Innings closed");
+      }
+
+      reload();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message);
+    }
+  };
+
   const addBall = async (
     kind: "run" | "wide" | "no_ball" | "bye" | "leg_bye" | "wicket",
     runs = 0,
   ) => {
+    if (kind === "wicket") {
+      handleWicketClick();
+      return;
+    }
     if (!currentInn) return toast.error("Start an innings first");
-    const isLastManActive = !!(
-      match?.last_man_batting &&
-      currentInn.wickets >= (battingPlayers.length > 0 ? battingPlayers.length - 1 : 10)
-    );
 
     if (!striker || !bowler) return toast.error("Select striker and bowler");
     if (!isSoloPlay && !isLastManActive && (!nonStriker || nonStriker === striker)) {
@@ -380,11 +504,11 @@ function LiveScoring() {
     }
     const wideRun = match.wide_run ?? 1;
     const noballRun = match.noball_run ?? 1;
-    const isLegal = kind === "run" || kind === "bye" || kind === "leg_bye" || kind === "wicket";
+    const isLegal = kind === "run" || kind === "bye" || kind === "leg_bye";
     let batterRuns = 0;
     let extraRuns = 0;
     let extraType: string | null = null;
-    let isWicket = false;
+    const isWicket = false;
     if (kind === "run") batterRuns = runs;
     else if (kind === "wide") {
       extraType = "wide";
@@ -399,9 +523,6 @@ function LiveScoring() {
     } else if (kind === "leg_bye") {
       extraType = "leg_bye";
       extraRuns = runs;
-    } else if (kind === "wicket") {
-      isWicket = true;
-      batterRuns = runs;
     }
 
     const ballIndex = innBalls.length;
@@ -442,6 +563,7 @@ function LiveScoring() {
           setStriker(nonStriker);
           setNonStriker(striker);
         }
+        setBowler("");
         toast.success("End of over");
       }
 
@@ -454,15 +576,10 @@ function LiveScoring() {
           : 10;
       if (newLegal >= match.overs * 6 || newWickets >= maxWickets || newWickets >= 10) {
         toast.success("Innings closed");
-      } else if (kind === "wicket") {
-        setStriker("");
-        toast.info("Wicket! Select new batsman");
       }
 
       reload();
-      if (kind !== "wicket") {
-        setUnlocked(false);
-      }
+      setUnlocked(false);
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message);
     }
@@ -797,7 +914,8 @@ function LiveScoring() {
             value={bowler}
             onChange={setBowler}
             options={bowlingPlayers}
-            disabled={isLocked}
+            disabled={isOverStarted || isLocked}
+            disabledOptions={disabledBowlers}
           />
         </Card>
       ) : (
@@ -960,6 +1078,82 @@ function LiveScoring() {
           End match
         </Button>
       )}
+
+      <Dialog open={isWicketDialogOpen} onOpenChange={setIsWicketDialogOpen}>
+        <DialogContent className="max-w-md bg-card border-border text-foreground">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold text-foreground">Wicket Details</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-3">
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-muted-foreground uppercase">
+                Wicket Type
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={wicketType === "regular" ? "default" : "outline"}
+                  onClick={() => {
+                    setWicketType("regular");
+                    setDismissedPlayerId(striker);
+                  }}
+                  className="w-full text-xs font-bold"
+                >
+                  Regular (Bowled, Caught, etc.)
+                </Button>
+                <Button
+                  type="button"
+                  variant={wicketType === "run_out" ? "default" : "outline"}
+                  onClick={() => setWicketType("run_out")}
+                  className="w-full text-xs font-bold"
+                >
+                  Run Out
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-muted-foreground uppercase">
+                Batsman Out
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={dismissedPlayerId === striker ? "default" : "outline"}
+                  onClick={() => setDismissedPlayerId(striker)}
+                  className="w-full text-xs font-semibold flex items-center justify-center gap-1.5"
+                  disabled={wicketType === "regular"}
+                >
+                  Striker: {playerName(striker)}
+                </Button>
+                {!isSoloPlay && !isLastManActive && (
+                  <Button
+                    type="button"
+                    variant={dismissedPlayerId === nonStriker ? "default" : "outline"}
+                    onClick={() => setDismissedPlayerId(nonStriker)}
+                    className="w-full text-xs font-semibold flex items-center justify-center gap-1.5"
+                    disabled={wicketType === "regular"}
+                  >
+                    Non-Striker: {playerName(nonStriker)}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex gap-2 justify-end">
+            <Button variant="outline" onClick={() => setIsWicketDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => executeWicketBall(wicketType, dismissedPlayerId)}
+              disabled={!dismissedPlayerId}
+            >
+              Confirm Wicket
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }
@@ -970,12 +1164,14 @@ function PSelect({
   onChange,
   options,
   disabled,
+  disabledOptions,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: any[];
   disabled?: boolean;
+  disabledOptions?: Set<string>;
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -985,11 +1181,14 @@ function PSelect({
           <SelectValue placeholder="Select" />
         </SelectTrigger>
         <SelectContent>
-          {options.map((p) => (
-            <SelectItem key={p.id} value={p.id}>
-              {p.name}
-            </SelectItem>
-          ))}
+          {options.map((p) => {
+            const isOptDisabled = disabledOptions?.has(p.id);
+            return (
+              <SelectItem key={p.id} value={p.id} disabled={isOptDisabled}>
+                {p.name} {isOptDisabled ? " (Consecutive over)" : ""}
+              </SelectItem>
+            );
+          })}
         </SelectContent>
       </Select>
     </div>
