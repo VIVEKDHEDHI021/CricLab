@@ -856,7 +856,7 @@ function LiveScoring() {
         </span>
       </div>
       <div className="flex items-center gap-2 md:gap-4">
-        {canScore && currentInn && !currentInn.is_closed && (
+        {canScore && currentInn && (
           <button
             onClick={undo}
             disabled={innBalls.length === 0}
@@ -1252,6 +1252,17 @@ function LiveScoring() {
 
                 {/* Byes / Leg Byes */}
                 <div className="flex gap-2 justify-center mt-3 pt-2.5 border-t border-border/30">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={undo}
+                    disabled={innBalls.length === 0}
+                    className="h-8 text-xs font-semibold px-4 border border-border/40 text-muted-foreground bg-card hover:bg-muted/40 rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    Undo
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"
