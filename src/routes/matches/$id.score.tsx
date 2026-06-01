@@ -811,7 +811,7 @@ function LiveScoring() {
   if (loading || !match)
     return (
       <AppShell>
-        <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center text-slate-400 font-medium">
+        <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground font-medium animate-pulse">
           Loading scoring details…
         </div>
       </AppShell>
@@ -840,13 +840,13 @@ function LiveScoring() {
   const activeInningsNo = currentInn?.innings_no || 1;
   const visibleOvers = showAllOvers ? oversData : oversData.slice(0, 4);
 
-  // Custom Header element shared across all states of active/completed innings
+  // Custom Header matching CricketHub branding and user layout
   const CustomHeader = (
     <div className="bg-[#0B1B3D] text-white py-3 px-4 flex items-center justify-between sticky top-0 z-20 shadow-md">
       <div className="flex items-center gap-3">
         <button
           onClick={() => nav({ to: "/matches/$id", params: { id } })}
-          className="hover:bg-white/10 p-1.5 rounded-full transition-colors"
+          className="hover:bg-white/10 p-1.5 rounded-full transition-colors cursor-pointer"
           title="Back to Match"
         >
           <ArrowLeft className="h-5 w-5" />
@@ -860,14 +860,14 @@ function LiveScoring() {
           <button
             onClick={undo}
             disabled={innBalls.length === 0}
-            className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 disabled:opacity-40 hover:bg-white/10 py-1 px-2 rounded-lg transition-all"
+            className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 disabled:opacity-40 hover:bg-white/10 py-1 px-2 rounded-lg transition-all cursor-pointer"
           >
             <RotateCcw className="h-4 w-4" />
             <span>Undo</span>
           </button>
         )}
         <button
-          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 hover:bg-white/10 py-1 px-2 rounded-lg transition-all"
+          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 hover:bg-white/10 py-1 px-2 rounded-lg transition-all cursor-pointer"
           onClick={() => toast.info("Scoring settings & details")}
         >
           <MoreHorizontal className="h-4 w-4" />
@@ -878,7 +878,7 @@ function LiveScoring() {
             toast.success("Match status saved!");
             nav({ to: "/matches/$id", params: { id } });
           }}
-          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 hover:bg-white/10 py-1 px-2 rounded-lg transition-all"
+          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 hover:bg-white/10 py-1 px-2 rounded-lg transition-all cursor-pointer"
         >
           <Save className="h-4 w-4" />
           <span>Save</span>
@@ -887,27 +887,27 @@ function LiveScoring() {
     </div>
   );
 
-  // Handle case where innings is complete or match is complete
+  // Innings / Match Completed wrapper (retaining dark/original colors)
   if (!currentInn || currentInn.is_closed) {
     const nextInnNo = (innings[innings.length - 1]?.innings_no ?? 0) + 1;
     if (nextInnNo > 2) {
       return (
         <AppShell>
-          <div className="bg-[#f8fafc] min-h-screen text-slate-800 font-sans pb-12">
+          <div className="bg-background min-h-screen text-foreground font-sans pb-12">
             {CustomHeader}
             <div className="max-w-xl mx-auto px-4 pt-6">
-              <Card className="bg-white border border-slate-100 shadow-sm p-6 rounded-2xl text-center space-y-4">
-                <h3 className="font-extrabold text-xl text-slate-900">Match Complete</h3>
-                <p className="text-sm text-slate-500">Both innings have completed.</p>
+              <Card className="p-6 rounded-2xl text-center space-y-4 shadow-lg border border-border">
+                <h3 className="font-extrabold text-xl">Match Complete</h3>
+                <p className="text-sm text-muted-foreground">Both innings have completed.</p>
                 {canScore ? (
                   <Button
                     onClick={endMatch}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-2.5 font-bold"
+                    className="w-full bg-primary text-primary-foreground font-bold hover:bg-primary/95 rounded-xl py-2.5"
                   >
                     Finish Match
                   </Button>
                 ) : (
-                  <p className="text-xs text-blue-600 font-semibold animate-pulse">
+                  <p className="text-xs text-primary font-semibold animate-pulse">
                     Waiting for scorer to finalize the match...
                   </p>
                 )}
@@ -925,29 +925,29 @@ function LiveScoring() {
           : match.team_a_id;
       return (
         <AppShell>
-          <div className="bg-[#f8fafc] min-h-screen text-slate-800 font-sans pb-12">
+          <div className="bg-background min-h-screen text-foreground font-sans pb-12">
             {CustomHeader}
             <div className="max-w-xl mx-auto px-4 pt-6">
-              <Card className="bg-white border border-slate-100 shadow-sm p-6 rounded-2xl text-center space-y-4">
-                <h3 className="font-extrabold text-xl text-slate-900">
+              <Card className="p-6 rounded-2xl text-center space-y-4 shadow-lg border border-border">
+                <h3 className="font-extrabold text-xl">
                   Innings 1 Complete
                 </h3>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-muted-foreground">
                   {teamName(innings[0].batting_team_id)} finished their innings with{" "}
-                  <span className="font-bold">
+                  <span className="font-bold text-foreground">
                     {innings[0].runs}/{innings[0].wickets}
                   </span>{" "}
                   in {oversText(innings[0].legal_balls)} overs.
                 </p>
                 {canScore ? (
                   <Button
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-2.5 font-bold"
+                    className="w-full bg-primary text-primary-foreground font-bold hover:bg-primary/95 rounded-xl py-2.5"
                     onClick={() => startInnings(opponentTeamId)}
                   >
                     Start {teamName(opponentTeamId)} Innings
                   </Button>
                 ) : (
-                  <p className="text-xs text-blue-600 font-semibold animate-pulse">
+                  <p className="text-xs text-primary font-semibold animate-pulse">
                     Waiting for scorer to start {teamName(opponentTeamId)} innings...
                   </p>
                 )}
@@ -960,24 +960,24 @@ function LiveScoring() {
 
     return (
       <AppShell>
-        <div className="bg-[#f8fafc] min-h-screen text-slate-800 font-sans pb-12">
+        <div className="bg-background min-h-screen text-foreground font-sans pb-12">
           {CustomHeader}
           <div className="max-w-xl mx-auto px-4 pt-6">
-            <Card className="bg-white border border-slate-100 shadow-sm p-6 rounded-2xl text-center space-y-4">
-              <h3 className="font-extrabold text-xl text-slate-900">Waiting to Start</h3>
-              <p className="text-sm text-slate-500">
+            <Card className="p-6 rounded-2xl text-center space-y-4 shadow-lg border border-border">
+              <h3 className="font-extrabold text-xl">Waiting to Start</h3>
+              <p className="text-sm text-muted-foreground">
                 Innings {nextInnNo} is ready to begin.
               </p>
               {canScore ? (
                 <div className="space-y-3">
                   <Button
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-2.5 font-bold"
+                    className="w-full bg-primary text-primary-foreground font-bold hover:bg-primary/95 rounded-xl py-2.5"
                     onClick={() => startInnings(match.team_a_id)}
                   >
                     {teamName(match.team_a_id)} Bats
                   </Button>
                   <Button
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-2.5 font-bold"
+                    className="w-full variant-secondary text-foreground font-bold rounded-xl py-2.5 border border-border bg-secondary hover:bg-secondary/90"
                     onClick={() => startInnings(match.team_b_id)}
                   >
                     {teamName(match.team_b_id)} Bats
@@ -985,7 +985,7 @@ function LiveScoring() {
                   {innings.length >= 2 && (
                     <Button
                       variant="outline"
-                      className="w-full border-slate-200 text-slate-700 py-2.5 font-bold"
+                      className="w-full border-border text-foreground py-2.5 font-bold"
                       onClick={endMatch}
                     >
                       End Match
@@ -993,7 +993,7 @@ function LiveScoring() {
                   )}
                 </div>
               ) : (
-                <p className="text-xs text-blue-600 font-semibold animate-pulse">
+                <p className="text-xs text-primary font-semibold animate-pulse">
                   Waiting for scorer to select batting team...
                 </p>
               )}
@@ -1006,28 +1006,28 @@ function LiveScoring() {
 
   return (
     <AppShell>
-      <div className="bg-[#f8fafc] min-h-screen text-slate-800 font-sans pb-12">
+      <div className="bg-background min-h-screen text-foreground font-sans pb-12">
         {CustomHeader}
 
         <div className="max-w-xl mx-auto px-4 pt-4 space-y-4">
           {/* Banner Score Card */}
-          <Card className="bg-white border border-slate-100 shadow-sm p-4 rounded-2xl relative overflow-hidden">
+          <Card className="p-4 rounded-2xl relative overflow-hidden border border-border/40 shadow-md">
             <div className="flex items-center justify-between relative pb-1">
               {/* Left Team (GT / 1st Innings) */}
               <div className="flex-1 flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full flex items-center justify-center font-extrabold text-white bg-blue-600 text-xs shadow-inner">
+                <div className="h-10 w-10 rounded-full flex items-center justify-center font-extrabold text-white bg-blue-600 text-xs shadow-md">
                   {team1Abbr}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h4 className="font-extrabold text-blue-700 text-sm tracking-wide truncate">
+                  <h4 className="font-extrabold text-blue-400 text-sm tracking-wide truncate">
                     {team1Name}
                   </h4>
-                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                  <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">
                     1st Innings
                   </p>
-                  <p className="font-black text-blue-900 text-base mt-0.5">
+                  <p className="font-black text-foreground text-base mt-0.5">
                     {leftScore}{" "}
-                    <span className="text-xs font-medium text-blue-700">
+                    <span className="text-xs font-medium text-muted-foreground/85">
                       ({leftOvers})
                     </span>
                   </p>
@@ -1035,53 +1035,53 @@ function LiveScoring() {
               </div>
 
               {/* VS Badge */}
-              <div className="bg-slate-50 border border-slate-200 text-slate-500 text-[10px] font-black h-7 w-7 rounded-full flex items-center justify-center shadow-sm mx-1 flex-shrink-0">
+              <div className="bg-muted border border-border/50 text-muted-foreground text-[10px] font-black h-7 w-7 rounded-full flex items-center justify-center shadow-sm mx-1 flex-shrink-0">
                 VS
               </div>
 
               {/* Right Team (RCB / 2nd Innings) */}
               <div className="flex-1 flex items-center justify-end gap-3 text-right">
                 <div className="flex-1 min-w-0">
-                  <h4 className="font-extrabold text-emerald-600 text-sm tracking-wide truncate">
+                  <h4 className="font-extrabold text-emerald-400 text-sm tracking-wide truncate">
                     {team2Name}
                   </h4>
-                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                  <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">
                     2nd Innings
                   </p>
-                  <p className="font-black text-slate-950 text-base mt-0.5">
+                  <p className="font-black text-foreground text-base mt-0.5">
                     {rightScore}{" "}
-                    <span className="text-xs font-medium text-slate-400">
+                    <span className="text-xs font-medium text-muted-foreground/85">
                       ({rightOvers})
                     </span>
                   </p>
                 </div>
-                <div className="h-10 w-10 rounded-full flex items-center justify-center font-extrabold text-white bg-emerald-600 text-xs shadow-inner">
+                <div className="h-10 w-10 rounded-full flex items-center justify-center font-extrabold text-white bg-emerald-600 text-xs shadow-md">
                   {team2Abbr}
                 </div>
               </div>
             </div>
 
-            {/* Active team underline indicator */}
-            <div className="w-full h-1 bg-slate-100 rounded-full mt-2 flex">
+            {/* Active team underline indicator using primary theme color */}
+            <div className="w-full h-1 bg-muted rounded-full mt-2 flex">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
                   activeInningsNo === 1
-                    ? "w-[45%] bg-blue-600"
-                    : "w-[45%] ml-[55%] bg-emerald-500"
+                    ? "w-[45%] bg-primary"
+                    : "w-[45%] ml-[55%] bg-primary"
                 }`}
               />
             </div>
           </Card>
 
           {/* Current Over Card */}
-          <Card className="bg-white border border-slate-100 shadow-sm p-4 rounded-2xl">
+          <Card className="p-4 rounded-2xl border border-border/40 shadow-md">
             <div className="flex justify-between items-center mb-3">
-              <span className="text-sm font-extrabold text-slate-800">
+              <span className="text-sm font-extrabold text-foreground">
                 Current Over ({oversText(currentInn.legal_balls)})
               </span>
-              <span className="text-[11px] text-slate-400 font-bold tracking-tight">
+              <span className="text-[11px] text-muted-foreground font-bold tracking-tight">
                 Batting:{" "}
-                <span className="text-slate-600 font-black">
+                <span className="text-foreground font-black">
                   {playerName(striker) || "—"}
                 </span>
               </span>
@@ -1096,14 +1096,14 @@ function LiveScoring() {
                 );
                 const b = currentOverBalls[idx];
 
-                let bgClass = "bg-slate-50 border border-slate-100 text-slate-300";
+                let bgClass = "bg-muted/30 border border-border/30 text-muted-foreground/30";
                 let label = "-";
 
                 if (b) {
                   label = String(b.runs);
-                  bgClass = "bg-slate-100 text-slate-700 font-bold border border-slate-200";
+                  bgClass = "bg-muted/80 text-foreground font-bold border border-border/40";
                   if (b.is_wicket) {
-                    bgClass = "bg-red-600 text-white font-extrabold shadow-sm";
+                    bgClass = "bg-destructive text-destructive-foreground font-extrabold shadow-sm";
                     label = "W";
                   } else if (b.runs === 4) {
                     bgClass = "bg-blue-600 text-white font-extrabold shadow-sm";
@@ -1112,20 +1112,20 @@ function LiveScoring() {
                     bgClass = "bg-purple-600 text-white font-extrabold shadow-sm";
                     label = "6";
                   } else if (b.runs === 0 && !b.extra_type) {
-                    bgClass = "bg-slate-100 text-slate-400 font-medium border border-slate-150";
+                    bgClass = "bg-muted/50 text-muted-foreground/50 border border-border/20";
                     label = "•";
                   } else if (b.extra_type === "wide") {
-                    bgClass = "bg-amber-100 text-amber-800 font-extrabold border border-amber-200";
+                    bgClass = "bg-amber-500/15 text-amber-400 font-extrabold border border-amber-500/25";
                     label = "Wd";
                   } else if (b.extra_type === "no_ball") {
-                    bgClass = "bg-purple-100 text-purple-800 font-extrabold border border-purple-200";
+                    bgClass = "bg-purple-500/15 text-purple-400 font-extrabold border border-purple-500/25";
                     label = "Nb";
                   }
                 }
 
                 return (
                   <div key={idx} className="flex flex-col items-center gap-1">
-                    <span className="text-[10px] text-slate-400 font-bold">
+                    <span className="text-[10px] text-muted-foreground font-bold">
                       {idx + 1}
                     </span>
                     <div
@@ -1138,87 +1138,95 @@ function LiveScoring() {
               })}
             </div>
 
-            {/* Scoring Panel Buttons (Grid 3x3) */}
+            {/* Scoring Panel Buttons (Grid 3x3 with Shadcn theme classes) */}
             {canScore && (
               <div className="space-y-3">
                 <div className="grid grid-cols-3 gap-2.5">
                   {/* Row 1: 0, 1, 2 */}
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary"
                     onClick={() => addBall("run", 0)}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 transition-all shadow-sm active:scale-95 flex items-center justify-center cursor-pointer disabled:opacity-50"
+                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer"
                   >
                     0
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="secondary"
                     onClick={() => addBall("run", 1)}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 transition-all shadow-sm active:scale-95 flex items-center justify-center cursor-pointer disabled:opacity-50"
+                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer"
                   >
                     1
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="secondary"
                     onClick={() => addBall("run", 2)}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 transition-all shadow-sm active:scale-95 flex items-center justify-center cursor-pointer disabled:opacity-50"
+                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer"
                   >
                     2
-                  </button>
+                  </Button>
 
                   {/* Row 2: 3, 4, 6 */}
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary"
                     onClick={() => addBall("run", 3)}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 transition-all shadow-sm active:scale-95 flex items-center justify-center cursor-pointer disabled:opacity-50"
+                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer"
                   >
                     3
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
                     onClick={() => addBall("run", 4)}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md shadow-blue-200 active:scale-95 flex items-center justify-center cursor-pointer disabled:opacity-50"
+                    className="h-14 text-base font-black rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md shadow-blue-900/10 border-none active:scale-95 cursor-pointer flex items-center justify-center"
                   >
                     4
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="secondary"
                     onClick={() => addBall("run", 6)}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 transition-all shadow-sm active:scale-95 flex items-center justify-center cursor-pointer disabled:opacity-50"
+                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer"
                   >
                     6
-                  </button>
+                  </Button>
 
                   {/* Row 3: W, WD, NB */}
-                  <button
+                  <Button
                     type="button"
+                    variant="destructive"
                     onClick={() => addBall("wicket")}
                     disabled={isInningsOver}
-                    className="h-14 rounded-xl border border-red-150 bg-white hover:bg-red-50/50 text-red-650 transition-all shadow-sm flex flex-col items-center justify-center active:scale-95 cursor-pointer disabled:opacity-50"
+                    className="h-14 rounded-xl flex flex-col items-center justify-center font-bold text-destructive-foreground active:scale-95 cursor-pointer"
                   >
                     <span className="text-base font-black">W</span>
-                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                    <span className="text-[9px] opacity-75 font-bold uppercase tracking-wider">
                       Wicket
                     </span>
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="outline"
                     onClick={() => addBall("wide")}
                     disabled={isInningsOver}
-                    className="h-14 rounded-xl border border-amber-150 bg-white hover:bg-amber-50/50 text-amber-600 transition-all shadow-sm flex flex-col items-center justify-center active:scale-95 cursor-pointer disabled:opacity-50"
+                    className="h-14 rounded-xl border border-border/40 bg-card hover:bg-muted/40 text-foreground flex flex-col items-center justify-center active:scale-95 cursor-pointer"
                   >
                     <span className="text-base font-black">WD</span>
-                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                    <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">
                       Wide
                     </span>
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="outline"
                     onClick={() => {
                       const runsStr = prompt(
                         "Enter runs scored off the bat on this No Ball (0, 1, 2, 3, 4, 6):",
@@ -1233,39 +1241,43 @@ function LiveScoring() {
                       }
                     }}
                     disabled={isInningsOver}
-                    className="h-14 rounded-xl border border-purple-150 bg-white hover:bg-purple-50/50 text-purple-650 transition-all shadow-sm flex flex-col items-center justify-center active:scale-95 cursor-pointer disabled:opacity-50"
+                    className="h-14 rounded-xl border border-border/40 bg-card hover:bg-muted/40 text-foreground flex flex-col items-center justify-center active:scale-95 cursor-pointer"
                   >
                     <span className="text-base font-black">NB</span>
-                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                    <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">
                       No Ball
                     </span>
-                  </button>
+                  </Button>
                 </div>
 
                 {/* Byes / Leg Byes */}
-                <div className="flex gap-2 justify-center mt-3 pt-2.5 border-t border-slate-100">
-                  <button
+                <div className="flex gap-2 justify-center mt-3 pt-2.5 border-t border-border/30">
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
                     onClick={() => addBall("bye", 1)}
                     disabled={isInningsOver}
-                    className="h-8 text-xs font-semibold px-4 border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 rounded-lg shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                    className="h-8 text-xs font-semibold px-4 border border-border/40 text-muted-foreground bg-card hover:bg-muted/40 rounded-lg shadow-sm transition-all cursor-pointer"
                   >
                     +1 Bye
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
                     onClick={() => addBall("leg_bye", 1)}
                     disabled={isInningsOver}
-                    className="h-8 text-xs font-semibold px-4 border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 rounded-lg shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                    className="h-8 text-xs font-semibold px-4 border border-border/40 text-muted-foreground bg-card hover:bg-muted/40 rounded-lg shadow-sm transition-all cursor-pointer"
                   >
                     +1 Leg Bye
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
 
             {!canScore && (
-              <div className="bg-emerald-50 text-emerald-800 border border-emerald-100 text-center py-2.5 px-4 rounded-xl text-xs font-medium space-y-1 mt-1">
+              <div className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 text-center py-2.5 px-4 rounded-xl text-xs font-medium space-y-1 mt-1">
                 <div className="font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 text-[9px]">
                   <span className="flex h-1.5 w-1.5 relative">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -1273,24 +1285,24 @@ function LiveScoring() {
                   </span>
                   Live Match Spectator View
                 </div>
-                <div className="text-[10px] text-emerald-600">
+                <div className="text-[10px] text-emerald-400/80">
                   Only the match creator or administrators can modify.
                 </div>
               </div>
             )}
           </Card>
 
-          {/* Scorer Controls / Dropdowns */}
+          {/* Scorer Controls / Dropdowns (preserving theme card classes) */}
           {canScore ? (
-            <Card className="p-4 rounded-2xl bg-white border border-slate-100 shadow-sm space-y-3.5 relative overflow-hidden">
+            <Card className="p-4 rounded-2xl border border-border/40 shadow-md space-y-3.5 relative overflow-hidden">
               {isLocked && (
-                <div className="absolute inset-0 bg-white/90 backdrop-blur-[1px] z-10 flex flex-col items-center justify-center gap-2 p-3 text-center">
-                  <span className="text-xs text-slate-500 flex items-center gap-1.5 font-bold">
+                <div className="absolute inset-0 bg-background/95 backdrop-blur-[1px] z-10 flex flex-col items-center justify-center gap-2 p-3 text-center">
+                  <span className="text-xs text-muted-foreground flex items-center gap-1.5 font-bold">
                     🔒 Selection Locked (Over in progress)
                   </span>
                   <Button
                     variant="outline"
-                    className="h-8 text-xs px-4 rounded-full font-bold border-slate-200 text-slate-700 bg-white hover:bg-slate-50 shadow-sm transition-all"
+                    className="h-8 text-xs px-4 rounded-full font-bold border-border text-foreground hover:bg-muted shadow-sm transition-all"
                     onClick={() => {
                       if (
                         confirm(
@@ -1306,16 +1318,16 @@ function LiveScoring() {
                 </div>
               )}
 
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-1">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+              <div className="flex items-center justify-between pb-2 border-b border-border/40 mb-1">
+                <span className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
                   Match Scoring Mode
                 </span>
                 <button
                   type="button"
                   className={`h-6 text-[10px] px-3 rounded-full font-bold uppercase cursor-pointer transition-all border ${
                     isSoloPlay
-                      ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                      : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "border-border text-muted-foreground hover:bg-muted"
                   }`}
                   onClick={() => {
                     setIsSoloPlay(!isSoloPlay);
@@ -1355,22 +1367,22 @@ function LiveScoring() {
               />
             </Card>
           ) : (
-            <Card className="p-4 rounded-2xl bg-white border border-slate-100 shadow-sm space-y-3">
-              <div className="flex justify-between items-center py-1 border-b border-slate-100">
-                <span className="text-slate-500 text-xs font-semibold flex items-center gap-1.5">
+            <Card className="p-4 rounded-2xl border border-border/40 shadow-md space-y-3">
+              <div className="flex justify-between items-center py-1 border-b border-border/40">
+                <span className="text-muted-foreground text-xs font-semibold flex items-center gap-1.5">
                   <span className="h-2 w-2 rounded-full bg-blue-600"></span>
                   Striker:
                 </span>
-                <span className="font-bold text-slate-800 text-xs">
+                <span className="font-bold text-foreground text-xs">
                   {playerName(striker) || "Not Selected"}
                 </span>
               </div>
-              <div className="flex justify-between items-center py-1 border-b border-slate-100">
-                <span className="text-slate-500 text-xs font-semibold flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-slate-300"></span>
+              <div className="flex justify-between items-center py-1 border-b border-border/40">
+                <span className="text-muted-foreground text-xs font-semibold flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-slate-500"></span>
                   Non-striker:
                 </span>
-                <span className="font-bold text-slate-800 text-xs">
+                <span className="font-bold text-foreground text-xs">
                   {isLastManRemaining
                     ? "None (Last Man Standing)"
                     : isSoloPlay
@@ -1379,11 +1391,11 @@ function LiveScoring() {
                 </span>
               </div>
               <div className="flex justify-between items-center py-1">
-                <span className="text-slate-500 text-xs font-semibold flex items-center gap-1.5">
+                <span className="text-muted-foreground text-xs font-semibold flex items-center gap-1.5">
                   <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
                   Bowler:
                 </span>
-                <span className="font-bold text-slate-800 text-xs">
+                <span className="font-bold text-foreground text-xs">
                   {playerName(bowler) || "Not Selected"}
                 </span>
               </div>
@@ -1391,41 +1403,41 @@ function LiveScoring() {
           )}
 
           {/* Previous Overs Card */}
-          <Card className="bg-white border border-slate-100 shadow-sm p-4 rounded-2xl">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-2 mb-1.5">
-              <span className="text-sm font-extrabold text-slate-800">
+          <Card className="p-4 rounded-2xl border border-border/40 shadow-md">
+            <div className="flex justify-between items-center border-b border-border/40 pb-2 mb-1.5">
+              <span className="text-sm font-extrabold text-foreground">
                 Previous Overs
               </span>
-              <span className="text-xs text-slate-400 font-bold">Runs</span>
+              <span className="text-xs text-muted-foreground font-bold">Runs</span>
             </div>
 
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-border/20">
               {visibleOvers.map((over) => (
                 <div
                   key={over.overNo}
-                  className="py-4 border-b border-slate-100 last:border-0 flex items-start justify-between"
+                  className="py-4 border-b border-border/25 last:border-0 flex items-start justify-between"
                 >
                   <div className="w-16 flex-shrink-0">
-                    <div className="font-bold text-slate-800 text-sm">
+                    <div className="font-bold text-foreground text-sm">
                       Ov {over.displayOver}
                     </div>
-                    <div className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                    <div className="text-[10px] text-muted-foreground font-semibold mt-0.5">
                       {over.scoreAtEnd}
                     </div>
                   </div>
                   <div className="flex-1 min-w-0 px-2 space-y-2">
-                    <p className="text-xs text-slate-500 font-semibold truncate">
+                    <p className="text-xs text-muted-foreground font-semibold truncate">
                       {over.bowlerName} to{" "}
-                      <span className="text-slate-700 font-bold">
+                      <span className="text-foreground font-bold">
                         {over.batterNames}
                       </span>
                     </p>
                     <div className="flex flex-wrap gap-1.5 items-center">
                       {over.balls.map((b) => {
-                        let bgClass = "bg-slate-100 text-slate-750";
+                        let bgClass = "bg-muted text-foreground";
                         let val = String(b.runs);
                         if (b.is_wicket) {
-                          bgClass = "bg-red-500 text-white shadow-sm";
+                          bgClass = "bg-destructive text-destructive-foreground shadow-sm";
                           val = "W";
                         } else if (b.runs === 4) {
                           bgClass = "bg-blue-600 text-white shadow-sm";
@@ -1434,13 +1446,13 @@ function LiveScoring() {
                           bgClass = "bg-purple-600 text-white shadow-sm";
                           val = "6";
                         } else if (b.runs === 0 && !b.extra_type) {
-                          bgClass = "bg-slate-100 text-slate-350 font-extrabold";
+                          bgClass = "bg-muted text-muted-foreground/45 font-extrabold";
                           val = "•";
                         } else if (b.extra_type === "wide") {
-                          bgClass = "bg-amber-100 text-amber-800";
+                          bgClass = "bg-amber-500/15 text-amber-400";
                           val = "Wd";
                         } else if (b.extra_type === "no_ball") {
-                          bgClass = "bg-purple-100 text-purple-800";
+                          bgClass = "bg-purple-500/15 text-purple-400";
                           val = "Nb";
                         }
                         return (
@@ -1454,13 +1466,13 @@ function LiveScoring() {
                       })}
                     </div>
                   </div>
-                  <div className="w-10 text-right font-black text-slate-800 text-sm self-center">
+                  <div className="w-10 text-right font-black text-foreground text-sm self-center">
                     {over.overRuns}
                   </div>
                 </div>
               ))}
               {oversData.length === 0 && (
-                <div className="py-4 text-center text-xs text-slate-400 italic">
+                <div className="py-4 text-center text-xs text-muted-foreground italic">
                   No overs completed yet
                 </div>
               )}
@@ -1469,7 +1481,7 @@ function LiveScoring() {
             {oversData.length > 4 && (
               <button
                 onClick={() => setShowAllOvers(!showAllOvers)}
-                className="w-full py-2 flex items-center justify-center gap-1 text-[10px] text-slate-500 font-bold border border-slate-100 rounded-xl bg-slate-50/50 hover:bg-slate-50 hover:text-slate-700 transition-colors mt-2 cursor-pointer"
+                className="w-full py-2 flex items-center justify-center gap-1 text-[10px] text-muted-foreground font-bold border border-border/40 rounded-xl bg-muted/40 hover:bg-muted hover:text-foreground transition-colors mt-2 cursor-pointer"
               >
                 {showAllOvers ? (
                   <>
@@ -1487,20 +1499,20 @@ function LiveScoring() {
           </Card>
 
           {/* Scoreboard Card */}
-          <Card className="bg-white border border-slate-100 shadow-sm p-4 rounded-2xl">
-            <div className="border-b border-slate-100 pb-2 mb-3">
-              <span className="text-sm font-extrabold text-slate-800">
+          <Card className="p-4 rounded-2xl border border-border/40 shadow-md">
+            <div className="border-b border-border/40 pb-2 mb-3">
+              <span className="text-sm font-extrabold text-foreground">
                 Scoreboard
               </span>
             </div>
 
-            {/* Responsive tables */}
+            {/* Side by side scoreboard tables */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Batters Table */}
-              <div className="border border-slate-100 rounded-xl overflow-hidden bg-slate-50/30 p-2">
+              <div className="border border-border/40 rounded-xl overflow-hidden bg-muted/10 p-2">
                 <table className="w-full text-left border-collapse text-[11px]">
                   <thead>
-                    <tr className="border-b border-slate-100 text-slate-400 font-bold">
+                    <tr className="border-b border-border/30 text-muted-foreground font-bold">
                       <th className="py-2 pl-1 font-bold">Batters</th>
                       <th className="py-2 text-right font-bold">R</th>
                       <th className="py-2 text-right font-bold">B</th>
@@ -1509,38 +1521,38 @@ function LiveScoring() {
                       <th className="py-2 text-right font-bold">SR</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100/50">
+                  <tbody className="divide-y divide-border/20">
                     {scoreboardBatters.map((b) => (
                       <tr
                         key={b.id}
                         className={`${
                           b.isStriker || b.isNonStriker
-                            ? "font-extrabold text-slate-800"
-                            : "text-slate-500 font-medium"
+                            ? "font-extrabold text-primary"
+                            : "text-muted-foreground/80 font-medium"
                         }`}
                       >
                         <td className="py-2 pl-1 truncate max-w-[100px]">
                           {b.name}
                           {b.isStriker ? " *" : ""}
                         </td>
-                        <td className="py-2 text-right text-slate-800">{b.runs}</td>
-                        <td className="py-2 text-right text-slate-400 font-normal">
+                        <td className="py-2 text-right text-foreground">{b.runs}</td>
+                        <td className="py-2 text-right text-muted-foreground/50 font-normal">
                           {b.balls}
                         </td>
-                        <td className="py-2 text-right text-slate-400 font-normal">
+                        <td className="py-2 text-right text-muted-foreground/50 font-normal">
                           {b.fours}
                         </td>
-                        <td className="py-2 text-right text-slate-400 font-normal">
+                        <td className="py-2 text-right text-muted-foreground/50 font-normal">
                           {b.sixes}
                         </td>
-                        <td className="py-2 text-right text-slate-400 font-mono font-normal">
+                        <td className="py-2 text-right text-muted-foreground/50 font-mono font-normal">
                           {b.sr}
                         </td>
                       </tr>
                     ))}
                     {scoreboardBatters.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-4 text-center text-slate-400 italic">
+                        <td colSpan={6} className="py-4 text-center text-muted-foreground italic">
                           No batsmen stats
                         </td>
                       </tr>
@@ -1550,10 +1562,10 @@ function LiveScoring() {
               </div>
 
               {/* Bowlers Table */}
-              <div className="border border-slate-100 rounded-xl overflow-hidden bg-slate-50/30 p-2">
+              <div className="border border-border/40 rounded-xl overflow-hidden bg-muted/10 p-2">
                 <table className="w-full text-left border-collapse text-[11px]">
                   <thead>
-                    <tr className="border-b border-slate-100 text-slate-400 font-bold">
+                    <tr className="border-b border-border/30 text-muted-foreground font-bold">
                       <th className="py-2 pl-1 font-bold">Bowlers</th>
                       <th className="py-2 text-right font-bold">O</th>
                       <th className="py-2 text-right font-bold">M</th>
@@ -1562,35 +1574,35 @@ function LiveScoring() {
                       <th className="py-2 text-right font-bold">Econ</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100/50">
+                  <tbody className="divide-y divide-border/20">
                     {scoreboardBowlers.map((b) => (
                       <tr
                         key={b.id}
                         className={`${
                           b.id === bowler
-                            ? "font-extrabold text-slate-800"
-                            : "text-slate-500 font-medium"
+                            ? "font-extrabold text-primary"
+                            : "text-muted-foreground/80 font-medium"
                         }`}
                       >
                         <td className="py-2 pl-1 truncate max-w-[100px]">{b.name}</td>
-                        <td className="py-2 text-right text-slate-800">{b.overs}</td>
-                        <td className="py-2 text-right text-slate-400 font-normal">
+                        <td className="py-2 text-right text-foreground">{b.overs}</td>
+                        <td className="py-2 text-right text-muted-foreground/50 font-normal">
                           {b.maidens}
                         </td>
-                        <td className="py-2 text-right text-slate-400 font-normal">
+                        <td className="py-2 text-right text-muted-foreground/50 font-normal">
                           {b.runs}
                         </td>
-                        <td className="py-2 text-right text-slate-800 font-extrabold">
+                        <td className="py-2 text-right text-foreground font-extrabold">
                           {b.wickets}
                         </td>
-                        <td className="py-2 text-right text-slate-400 font-mono font-normal">
+                        <td className="py-2 text-right text-muted-foreground/50 font-mono font-normal">
                           {b.econ}
                         </td>
                       </tr>
                     ))}
                     {scoreboardBowlers.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-4 text-center text-slate-400 italic">
+                        <td colSpan={6} className="py-4 text-center text-muted-foreground italic">
                           No bowlers stats
                         </td>
                       </tr>
@@ -1601,25 +1613,25 @@ function LiveScoring() {
             </div>
 
             {/* Extras and Totals Block */}
-            <div className="mt-4 grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
+            <div className="mt-4 grid grid-cols-2 gap-3 bg-muted/30 p-3 rounded-xl border border-border/30">
               <div>
-                <div className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                <div className="text-[9px] font-black text-muted-foreground uppercase tracking-wider">
                   Extras
                 </div>
-                <div className="text-xs font-bold text-slate-700 mt-0.5">
+                <div className="text-xs font-bold text-foreground mt-0.5">
                   {extrasTotal}{" "}
-                  <span className="text-[10px] font-medium text-slate-400">
+                  <span className="text-[10px] font-medium text-muted-foreground">
                     ({extrasBreakdown})
                   </span>
                 </div>
               </div>
               <div>
-                <div className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                <div className="text-[9px] font-black text-muted-foreground uppercase tracking-wider">
                   Total
                 </div>
-                <div className="text-xs font-extrabold text-slate-900 mt-0.5">
+                <div className="text-xs font-extrabold text-foreground mt-0.5">
                   {currentInn.runs}/{currentInn.wickets}{" "}
-                  <span className="text-[10px] font-medium text-slate-500">
+                  <span className="text-[10px] font-medium text-muted-foreground">
                     ({oversText(currentInn.legal_balls)} Overs)
                   </span>
                 </div>
@@ -1629,25 +1641,25 @@ function LiveScoring() {
 
           {/* Yet to Bat Batsmen */}
           {yetToBatPlayers.length > 0 && (
-            <Card className="p-4 rounded-2xl bg-white border border-slate-100 shadow-sm">
-              <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2.5">
+            <Card className="p-4 rounded-2xl border border-border/40 shadow-md">
+              <div className="text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-2.5">
                 Next Batsmen & State
               </div>
               <div className="space-y-2">
                 {yetToBatPlayers.map((p, idx) => (
                   <div
                     key={p.id}
-                    className="flex justify-between items-center text-xs py-1.5 border-b border-slate-100 last:border-0"
+                    className="flex justify-between items-center text-xs py-1.5 border-b border-border/20 last:border-0"
                   >
-                    <span className="font-bold text-slate-700 flex items-center gap-2">
+                    <span className="font-bold text-foreground flex items-center gap-2">
                       <span>{p.name}</span>
                       {idx === 0 && (
-                        <span className="text-[8px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-black uppercase tracking-wide">
+                        <span className="text-[8px] bg-primary/20 text-primary px-1.5 py-0.5 rounded font-black uppercase tracking-wide animate-pulse">
                           Next Up
                         </span>
                       )}
                     </span>
-                    <span className="text-[10px] text-slate-400 font-bold">
+                    <span className="text-[10px] text-muted-foreground font-bold">
                       Yet to Bat
                     </span>
                   </div>
@@ -1660,7 +1672,7 @@ function LiveScoring() {
           {canScore && (
             <Button
               variant="outline"
-              className="w-full py-2.5 bg-white hover:bg-slate-50 text-slate-750 border-slate-200 rounded-xl shadow-sm text-xs font-bold transition-all active:scale-97 cursor-pointer"
+              className="w-full py-2.5 border-border hover:bg-muted text-foreground rounded-xl shadow-sm text-xs font-bold transition-all active:scale-97 cursor-pointer"
               onClick={endMatch}
             >
               End Match
@@ -1670,15 +1682,15 @@ function LiveScoring() {
       </div>
 
       <Dialog open={isWicketDialogOpen} onOpenChange={setIsWicketDialogOpen}>
-        <DialogContent className="max-w-md bg-white border border-slate-150 text-slate-800 rounded-2xl shadow-xl">
+        <DialogContent className="max-w-md bg-card border border-border text-foreground rounded-2xl shadow-xl">
           <DialogHeader>
-            <DialogTitle className="text-base font-extrabold text-slate-900">
+            <DialogTitle className="text-base font-extrabold">
               Wicket Details
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-3">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+              <label className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
                 Wicket Type
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -1705,7 +1717,7 @@ function LiveScoring() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+              <label className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
                 Dismissed Batsman
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -1772,12 +1784,12 @@ function PSelect({
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-xs font-bold text-slate-500 w-24">{label}</span>
+      <span className="text-xs font-bold text-muted-foreground w-24">{label}</span>
       <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger className="flex-1 h-9 text-xs border-slate-200 text-slate-700 bg-white" disabled={disabled}>
+        <SelectTrigger className="flex-1 h-9 text-xs border-border text-foreground bg-card" disabled={disabled}>
           <SelectValue placeholder="Select" />
         </SelectTrigger>
-        <SelectContent className="bg-white border border-slate-100 text-slate-800 text-xs shadow-md">
+        <SelectContent className="bg-card border border-border text-foreground text-xs shadow-md">
           {options.map((p) => {
             const isOptDisabled = disabledOptions?.has(p.id);
             return (
