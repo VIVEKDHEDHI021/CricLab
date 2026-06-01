@@ -80,13 +80,17 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <header className="sticky top-0 z-20 bg-background/90 backdrop-blur border-b border-border px-4 py-3 flex items-center justify-between">
-        <div className="text-xl font-bold tracking-tight">
-          <span className="text-primary">Cric</span>Lab
-        </div>
-        {title && <div className="text-sm text-muted-foreground">{title}</div>}
-      </header>
-      <main className={`flex-1 px-4 pt-4 max-w-xl w-full mx-auto ${isScoringPage ? "pb-8" : "pb-28"}`}>{children}</main>
+      {!isScoringPage && (
+        <header className="sticky top-0 z-20 bg-background/90 backdrop-blur border-b border-border px-4 py-3 flex items-center justify-between">
+          <div className="text-xl font-bold tracking-tight">
+            <span className="text-primary">Cric</span>Lab
+          </div>
+          {title && <div className="text-sm text-muted-foreground">{title}</div>}
+        </header>
+      )}
+      <main className={isScoringPage ? "flex-1 pb-8 w-full" : "flex-1 px-4 pt-4 max-w-xl w-full mx-auto pb-28"}>
+        {children}
+      </main>
 
       {loc.pathname === "/dashboard" && (
         <Link
