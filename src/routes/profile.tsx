@@ -62,7 +62,7 @@ function UserProfilePage() {
   }, []);
 
   useEffect(() => {
-    if (gsiLoaded && window.google && user && !user.google_id) {
+    if (gsiLoaded && window.google && user && !user.google_id && !loading) {
       const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
       if (!clientId) return;
 
@@ -95,7 +95,7 @@ function UserProfilePage() {
 
       return () => clearTimeout(timer);
     }
-  }, [gsiLoaded, user]);
+  }, [gsiLoaded, user, loading]);
 
   const handleLinkFallbackClick = () => {
     toast.error("Google Client ID is missing. Please add VITE_GOOGLE_CLIENT_ID to your environment variables (.env.production or Render config).", {
