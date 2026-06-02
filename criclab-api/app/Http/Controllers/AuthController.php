@@ -153,6 +153,8 @@ class AuthController extends Controller
             'username' => $account->username,
             'mobile' => $account->mobile,
             'role' => $account->role,
+            'google_id' => $account->google_id,
+            'email' => $account->email,
         ]);
     }
 
@@ -185,7 +187,137 @@ class AuthController extends Controller
                 'username' => $account->username,
                 'mobile' => $account->mobile,
                 'role' => $account->role,
+                'google_id' => $account->google_id,
+                'email' => $account->email,
             ],
         ]);
+    }
+
+    public function loginWithGoogle(Request $request)
+    {
+        $request->validate([
+            'credential' => 'required|string',
+        ]);
+
+        $credential = $request->credential;
+
+        try {
+            $response = \Illuminate\Support\Facades\Http::get("https://oauth2.googleapis.com/tokeninfo", [
+                'id_token' => $credential,
+            ]);
+
+            if (!$response->successful()) {
+                return response()->json([
+                    'message' => 'Invalid Google credential token.'
+                ], 400);
+            }
+
+            $payload = $response->json();
+
+            if (!isset($payload['sub']) || !isset($payload['email'])) {
+                return response()->json([
+                    'message' => 'Invalid token structure from Google.'
+                ], 400);
+            }
+
+            $googleId = $payload['sub'];
+            $email = $payload['email'];
+
+            $account = Account::where('google_id', $googleId)
+                ->orWhere('email', $email)
+                ->first();
+
+            if (!$account) {
+                return response()->json([
+                    'message' => 'No CricLab account is connected to this Google profile. Please log in normally first and connect Google in your settings.'
+                ], 404);
+            }
+
+            if (empty($account->google_id)) {
+                $account->update([
+                    'google_id' => $googleId,
+                    'email' => $email,
+                ]);
+            }
+
+            return $this->loginResponse($account);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Google Login Error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'An error occurred during Google sign-in: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function linkGoogleAccount(Request $request)
+    {
+        $request->validate([
+            'credential' => 'required|string',
+        ]);
+
+        $credential = $request->credential;
+        $user = $request->user();
+
+        try {
+            $response = \Illuminate\Support\Facades\Http::get("https://oauth2.googleapis.com/tokeninfo", [
+                'id_token' => $credential,
+            ]);
+
+            if (!$response->successful()) {
+                return response()->json([
+                    'message' => 'Invalid Google credential token.'
+                ], 400);
+            }
+
+            $payload = $response->json();
+
+            if (!isset($payload['sub']) || !isset($payload['email'])) {
+                return response()->json([
+                    'message' => 'Invalid token structure from Google.'
+                ], 400);
+            }
+
+            $googleId = $payload['sub'];
+            $email = $payload['email'];
+
+            $existing = Account::where(function($query) use ($googleId, $email) {
+                    $query->where('google_id', $googleId)
+                          ->orWhere('email', $email);
+                })
+                ->where('id', '!=', $user->id)
+                ->first();
+
+            if ($existing) {
+                return response()->json([
+                    'message' => 'This Google account is already connected to another CricLab account.'
+                ], 422);
+            }
+
+            $user->update([
+                'google_id' => $googleId,
+                'email' => $email,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Google account connected successfully.',
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'username' => $user->username,
+                    'mobile' => $user->mobile,
+                    'role' => $user->role,
+                    'google_id' => $user->google_id,
+                    'email' => $user->email,
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Google Link Error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'An error occurred while connecting Google account: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

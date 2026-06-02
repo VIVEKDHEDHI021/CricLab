@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Broadcast;
 Route::post('/login', [AuthController::class, 'login'])->name('login');
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/register/admin', [AuthController::class, 'registerAdmin']);
+Route::post('/auth/google/login', [AuthController::class, 'loginWithGoogle']);
 Route::get('/make-admin-manual', function () {
     try {
         AdminAccountService::syncDefaultAccounts();
@@ -39,6 +40,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
+    Route::post('/auth/google/link', [AuthController::class, 'linkGoogleAccount']);
 
     // General reads and writes
     Route::get('/teams', [TeamController::class, 'index']);

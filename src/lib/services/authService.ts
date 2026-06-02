@@ -6,6 +6,8 @@ export type AuthUser = {
   username?: string;
   mobile: string;
   role: 'admin' | 'user' | 'scorer';
+  google_id?: string;
+  email?: string;
 };
 
 export type LoginResponse = {
@@ -55,6 +57,16 @@ export const authService = {
 
   async getMe(): Promise<AuthUser> {
     const { data } = await api.get<AuthUser>('/me');
+    return data;
+  },
+
+  async loginWithGoogle(credential: string): Promise<LoginResponse> {
+    const { data } = await api.post<LoginResponse>('/auth/google/login', { credential });
+    return data;
+  },
+
+  async linkGoogle(credential: string): Promise<{ success: boolean; message: string; user: AuthUser }> {
+    const { data } = await api.post<{ success: boolean; message: string; user: AuthUser }>('/auth/google/link', { credential });
     return data;
   },
 };
