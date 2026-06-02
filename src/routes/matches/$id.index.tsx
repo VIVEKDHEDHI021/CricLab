@@ -30,6 +30,8 @@ function MatchDetails() {
     queryFn: () => matchService.getMatch(id),
   });
 
+  const { m, teams, innings, players, balls } = (data || {}) as any;
+
   const [activeTab, setActiveTab] = useState<"live" | "scorecard" | "squads" | "overs">(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem(`active_tab_${id}`);
@@ -221,7 +223,6 @@ function MatchDetails() {
   }, [data, selectedOversInningsId]);
 
   if (isLoading || !data) return <AppShell><div className="text-muted-foreground">Loading…</div></AppShell>;
-  const { m, teams, innings, players, balls } = data as any;
   const teamName = (tid: string) => teams?.find((t: any) => t.id === tid)?.name ?? "—";
 
   const teamAPlayers = (players ?? []).filter((p: any) => p.team_id === m.team_a_id);
