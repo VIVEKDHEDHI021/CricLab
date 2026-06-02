@@ -27,6 +27,7 @@ class BallController extends Controller
             'is_wicket' => 'required|boolean',
             'wicket_type' => 'nullable|string',
             'is_legal' => 'required|boolean',
+            'caught_by_id' => 'nullable|uuid|exists:players,id',
         ]);
 
         $innings = Innings::findOrFail($inningsId);
@@ -51,7 +52,15 @@ class BallController extends Controller
             'is_wicket' => $request->is_wicket,
             'wicket_type' => $request->wicket_type,
             'is_legal' => $request->is_legal,
+            'caught_by_id' => $request->caught_by_id,
         ]);
+
+        if ($request->is_wicket && $request->wicket_type === 'caught' && $request->caught_by_id) {
+            $catcher = Player::find($request->caught_by_id);
+            if ($catcher) {
+                $catcher->increment('catches');
+            }
+        }
 
         $totalRuns = $request->runs + $request->extra_runs;
         $newRuns = $innings->runs + $totalRuns;
@@ -149,6 +158,13 @@ class BallController extends Controller
             'legal_balls' => $newLegal,
             'is_closed' => false,
         ]);
+
+        if ($ball->is_wicket && $ball->wicket_type === 'caught' && $ball->caught_by_id) {
+            $catcher = Player::find($ball->caught_by_id);
+            if ($catcher) {
+                $catcher->decrement('catches');
+            }
+        }
 
         $ball->delete();
 

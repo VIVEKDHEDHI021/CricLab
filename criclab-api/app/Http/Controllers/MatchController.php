@@ -24,6 +24,7 @@ class MatchController extends Controller
                 'overs' => $m->overs,
                 'result' => $m->result,
                 'last_man_batting' => $m->last_man_batting,
+                'man_of_the_match_id' => $m->man_of_the_match_id,
                 'team_a' => $m->teamA ? ['id' => $m->teamA->id, 'name' => $m->teamA->name] : null,
                 'team_b' => $m->teamB ? ['id' => $m->teamB->id, 'name' => $m->teamB->name] : null,
                 'innings' => $m->innings->map(function ($i) {
@@ -145,5 +146,31 @@ class MatchController extends Controller
         \App\Events\MatchUpdated::dispatch($match);
 
         return response()->json(['result' => $result]);
+    }
+
+    public function update(Request $request, $id)
+    {
+        $match = CricketMatch::findOrFail($id);
+
+        if (!in_array($request->user()->role, ['admin', 'scorer']) && $match->created_by !== $request->user()->id) {
+            return response()->json(['message' => 'You are not authorized to update this match.'], 403);
+        }
+
+        $request->validate([
+            'man_of_the_match_id' => 'nullable|uuid|exists:players,id',
+            'result' => 'nullable|string',
+            'ground' => 'nullable|string',
+            'match_type' => 'nullable|string',
+            'overs' => 'nullable|integer|min:1|max:50',
+            'status' => 'nullable|string|in:upcoming,live,past',
+        ]);
+
+        $match->update($request->only([
+            'man_of_the_match_id', 'result', 'ground', 'match_type', 'overs', 'status'
+        ]));
+
+        \App\Events\MatchUpdated::dispatch($match);
+
+        return response()->json($match);
     }
 }

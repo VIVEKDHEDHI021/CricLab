@@ -9,7 +9,8 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 #[Fillable([
     'team_a_id', 'team_b_id', 'overs', 'wide_run', 'noball_run',
     'match_type', 'ground', 'match_date', 'status', 'result',
-    'batting_first_id', 'current_innings', 'created_by', 'last_man_batting'
+    'batting_first_id', 'current_innings', 'created_by', 'last_man_batting',
+    'man_of_the_match_id'
 ])]
 class CricketMatch extends Model
 {
@@ -49,5 +50,10 @@ class CricketMatch extends Model
     public function creator()
     {
         return $this->belongsTo(Account::class, 'created_by');
+    }
+
+    public function manOfTheMatch()
+    {
+        return $this->belongsTo(Player::class, 'man_of_the_match_id');
     }
 }

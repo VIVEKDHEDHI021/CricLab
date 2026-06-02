@@ -49,4 +49,19 @@ export const matchService = {
     const { data } = await api.patch<{ result: string }>(`/matches/${id}/end`);
     return data;
   },
+
+  async updateMatch(
+    id: string,
+    matchData: {
+      man_of_the_match_id?: string | null;
+      result?: string;
+      ground?: string;
+      match_type?: string;
+      overs?: number;
+      status?: string;
+    }
+  ): Promise<any> {
+    const { data } = await api.put<any>(`/matches/${id}`, matchData);
+    return data;
+  },
 };

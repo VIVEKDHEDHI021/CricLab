@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { matchService } from "@/lib/services/matchService";
 import { playerService, type Player } from "@/lib/services/playerService";
@@ -53,6 +53,133 @@ function MatchDetails() {
   const [playerMobile, setPlayerMobile] = useState("");
   const [selectedExistingPlayer, setSelectedExistingPlayer] = useState<Player | null>(null);
   const [submittingPlayer, setSubmittingPlayer] = useState(false);
+
+  // Man of the Match states
+  const [isMoMModalOpen, setIsMoMModalOpen] = useState(false);
+  const [selectedMoMPlayerId, setSelectedMoMPlayerId] = useState("");
+  const [submittingMoM, setSubmittingMoM] = useState(false);
+
+  // Recommendations / player stats calculation
+  const playerStats = useMemo(() => {
+    if (!players || !balls) return [];
+    
+    return players.map((p: any) => {
+      const batBalls = balls.filter((b: any) => b.batter_id === p.id);
+      const runsScored = batBalls.reduce((sum: number, b: any) => sum + b.runs, 0);
+      const ballsFaced = batBalls.filter((b: any) => b.extra_type !== "wide").length;
+      const fours = batBalls.filter((b: any) => b.runs === 4).length;
+      const sixes = batBalls.filter((b: any) => b.runs === 6).length;
+      const sr = ballsFaced > 0 ? (runsScored / ballsFaced) * 100 : 0;
+      const isOut = balls.some((b: any) => b.is_wicket && b.batter_id === p.id && b.wicket_type !== "retired_hurt");
+      
+      const bowlBalls = balls.filter((b: any) => b.bowler_id === p.id);
+      const wickets = bowlBalls.filter((b: any) => b.is_wicket && b.wicket_type !== "run_out" && b.wicket_type !== "retired_hurt").length;
+      const runsConceded = bowlBalls.reduce((sum: number, b: any) => sum + b.runs, 0) + 
+                            bowlBalls.filter((b: any) => b.extra_type === "wide" || b.extra_type === "no_ball")
+                                     .reduce((sum: number, b: any) => sum + b.extra_runs, 0);
+      const legalBowled = bowlBalls.filter((b: any) => b.is_legal).length;
+      const econ = legalBowled > 0 ? (runsConceded / (legalBowled / 6)) : 0;
+      
+      // Calculate maidens
+      const oversGrouped = bowlBalls.reduce((acc: any, b: any) => {
+        const key = `${b.innings_id}_${b.over_number}`;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(b);
+        return acc;
+      }, {});
+      
+      let maidens = 0;
+      Object.values(oversGrouped).forEach((overBalls: any) => {
+        const legalInOver = overBalls.filter((b: any) => b.is_legal).length;
+        if (legalInOver >= 6) {
+          const overRuns = overBalls.reduce((sum: number, b: any) => sum + b.runs, 0) + 
+                           overBalls.filter((b: any) => b.extra_type === "wide" || b.extra_type === "no_ball")
+                                    .reduce((sum: number, b: any) => sum + b.extra_runs, 0);
+          if (overRuns === 0) {
+            maidens++;
+          }
+        }
+      });
+      
+      // Catches taken in this match
+      const catches = balls.filter((b: any) => b.is_wicket && b.wicket_type === "caught" && b.caught_by_id === p.id).length;
+      
+      // MVP formula: runs + wickets*20 + catches*10 + sixes*5 + fours*2 + maidens*25
+      const mvpPoints = runsScored + (wickets * 20) + (catches * 10) + (sixes * 5) + (fours * 2) + (maidens * 25);
+      
+      return {
+        player: p,
+        runsScored,
+        ballsFaced,
+        fours,
+        sixes,
+        sr,
+        isOut,
+        wickets,
+        runsConceded,
+        legalBowled,
+        econ,
+        maidens,
+        catches,
+        mvpPoints
+      };
+    });
+  }, [players, balls]);
+
+  const bestBatsman = useMemo(() => {
+    if (playerStats.length === 0) return null;
+    return [...playerStats].sort((a, b) => {
+      if (b.runsScored !== a.runsScored) return b.runsScored - a.runsScored;
+      if (a.ballsFaced !== b.ballsFaced) return a.ballsFaced - b.ballsFaced;
+      return b.sr - a.sr;
+    })[0];
+  }, [playerStats]);
+
+  const bestBowler = useMemo(() => {
+    if (playerStats.length === 0) return null;
+    return [...playerStats].sort((a, b) => {
+      if (b.wickets !== a.wickets) return b.wickets - a.wickets;
+      if (a.runsConceded !== b.runsConceded) return a.runsConceded - b.runsConceded;
+      return a.econ - b.econ;
+    })[0];
+  }, [playerStats]);
+
+  const calculatedMoM = useMemo(() => {
+    if (playerStats.length === 0) return null;
+    return [...playerStats].sort((a, b) => {
+      if (b.mvpPoints !== a.mvpPoints) return b.mvpPoints - a.mvpPoints;
+      if (b.runsScored !== a.runsScored) return b.runsScored - a.runsScored;
+      return b.wickets - a.wickets;
+    })[0];
+  }, [playerStats]);
+
+  const momPlayer = useMemo(() => {
+    const momId = m?.man_of_the_match_id || calculatedMoM?.player.id;
+    if (!momId) return null;
+    return playerStats.find((ps) => ps.player.id === momId) || null;
+  }, [m?.man_of_the_match_id, calculatedMoM, playerStats]);
+
+  useEffect(() => {
+    if (m) {
+      setSelectedMoMPlayerId(m.man_of_the_match_id || calculatedMoM?.player.id || "");
+    }
+  }, [m, calculatedMoM]);
+
+  const handleSaveMoM = async () => {
+    setSubmittingMoM(true);
+    try {
+      await matchService.updateMatch(id, {
+        man_of_the_match_id: selectedMoMPlayerId || null
+      });
+      toast.success("Man of the Match updated successfully");
+      setIsMoMModalOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["match", id] });
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Failed to update Man of the Match");
+    } finally {
+      setSubmittingMoM(false);
+    }
+  };
 
   const loadAppPlayers = async () => {
     try {
@@ -188,6 +315,147 @@ function MatchDetails() {
           </Link>
         )}
       </Card>
+
+      {/* Top Performers Card (Only for past matches) */}
+      {m.status === "past" && (
+        <Card className="p-4 rounded-2xl mb-4 bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-yellow-500/10 border border-amber-500/20 shadow-lg relative overflow-hidden backdrop-blur-md">
+          {/* Decorative background circle */}
+          <div className="absolute top-[-30px] right-[-30px] w-24 h-24 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+          
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-xl">🏆</span>
+            <h3 className="font-extrabold text-base tracking-tight text-foreground bg-gradient-to-r from-amber-500 to-orange-500 bg-clip-text text-transparent">
+              Match Honours & Top Performers
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Man of the Match */}
+            <div className="p-3.5 rounded-xl bg-card/60 border border-border/80 flex flex-col justify-between shadow-sm hover:border-amber-500/30 transition-all">
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest flex items-center gap-1">
+                    🌟 Man of the Match
+                  </span>
+                  {canManage && (
+                    <button
+                      onClick={() => setIsMoMModalOpen(true)}
+                      className="text-[10px] text-primary hover:underline font-bold"
+                    >
+                      {m.man_of_the_match_id ? "Change" : "Select"}
+                    </button>
+                  )}
+                </div>
+                {momPlayer ? (
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center font-bold text-amber-600 text-sm overflow-hidden shrink-0">
+                      {momPlayer.player.avatar ? (
+                        <img src={momPlayer.player.avatar} alt={momPlayer.player.name} className="w-full h-full object-cover" />
+                      ) : (
+                        momPlayer.player.name.slice(0, 2).toUpperCase()
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm text-foreground leading-tight">
+                        {momPlayer.player.name}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        {teamName(momPlayer.player.team_id)}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground italic">No player selected</div>
+                )}
+              </div>
+              {momPlayer && (
+                <div className="mt-3 pt-2.5 border-t border-border/60 flex justify-between text-xs font-semibold text-muted-foreground">
+                  <span>Match Performance:</span>
+                  <span className="text-foreground font-bold">
+                    {momPlayer.runsScored} runs {momPlayer.wickets > 0 && `& ${momPlayer.wickets} Wkts`}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Best Batsman */}
+            <div className="p-3.5 rounded-xl bg-card/60 border border-border/80 flex flex-col justify-between shadow-sm hover:border-primary/20 transition-all">
+              <div>
+                <div className="text-[10px] font-black text-primary uppercase tracking-widest mb-2 flex items-center gap-1">
+                  🏏 Best Batsman
+                </div>
+                {bestBatsman ? (
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center font-bold text-primary text-sm overflow-hidden shrink-0">
+                      {bestBatsman.player.avatar ? (
+                        <img src={bestBatsman.player.avatar} alt={bestBatsman.player.name} className="w-full h-full object-cover" />
+                      ) : (
+                        bestBatsman.player.name.slice(0, 2).toUpperCase()
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm text-foreground leading-tight">
+                        {bestBatsman.player.name}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        {teamName(bestBatsman.player.team_id)}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground italic">No batting stats</div>
+                )}
+              </div>
+              {bestBatsman && (
+                <div className="mt-3 pt-2.5 border-t border-border/60 flex justify-between text-xs font-semibold text-muted-foreground">
+                  <span>Score:</span>
+                  <span className="text-foreground font-bold">
+                    {bestBatsman.runsScored} ({bestBatsman.ballsFaced}) · SR: {bestBatsman.sr.toFixed(1)}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Best Bowler */}
+            <div className="p-3.5 rounded-xl bg-card/60 border border-border/80 flex flex-col justify-between shadow-sm hover:border-purple-500/20 transition-all">
+              <div>
+                <div className="text-[10px] font-black text-purple-500 uppercase tracking-widest mb-2 flex items-center gap-1">
+                  🥎 Best Bowler
+                </div>
+                {bestBowler ? (
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-full bg-purple-500/10 border border-purple-500/20 flex items-center justify-center font-bold text-purple-600 text-sm overflow-hidden shrink-0">
+                      {bestBowler.player.avatar ? (
+                        <img src={bestBowler.player.avatar} alt={bestBowler.player.name} className="w-full h-full object-cover" />
+                      ) : (
+                        bestBowler.player.name.slice(0, 2).toUpperCase()
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm text-foreground leading-tight">
+                        {bestBowler.player.name}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        {teamName(bestBowler.player.team_id)}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground italic">No bowling stats</div>
+                )}
+              </div>
+              {bestBowler && (
+                <div className="mt-3 pt-2.5 border-t border-border/60 flex justify-between text-xs font-semibold text-muted-foreground">
+                  <span>Figures:</span>
+                  <span className="text-foreground font-bold">
+                    {bestBowler.wickets}/{bestBowler.runsConceded} ({oversText(bestBowler.legalBowled)})
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Tab bar */}
       <div className="flex border-b border-border/80 mb-4 bg-muted/40 p-1 rounded-xl">
@@ -846,6 +1114,62 @@ function MatchDetails() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Man of the Match Selection Dialog */}
+      <Dialog open={isMoMModalOpen} onOpenChange={setIsMoMModalOpen}>
+        <DialogContent className="max-w-md bg-card border border-border text-foreground rounded-2xl shadow-xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-extrabold">
+              Select Man of the Match
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-3">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
+                Choose Player
+              </label>
+              <select
+                value={selectedMoMPlayerId}
+                onChange={(e) => setSelectedMoMPlayerId(e.target.value)}
+                className="w-full h-10 px-3 py-2 text-xs border border-border bg-background rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">-- Select Player --</option>
+                <optgroup label={teamName(m.team_a_id)}>
+                  {teamAPlayers.map((p: any) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label={teamName(m.team_b_id)}>
+                  {teamBPlayers.map((p: any) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
+          </div>
+          <DialogFooter className="flex gap-2 justify-end pt-2">
+            <Button
+              variant="outline"
+              className="text-xs h-9 font-semibold"
+              onClick={() => setIsMoMModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              className="text-xs h-9 font-bold"
+              onClick={handleSaveMoM}
+              disabled={submittingMoM}
+            >
+              {submittingMoM ? "Saving..." : "Save Selection"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

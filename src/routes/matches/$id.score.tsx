@@ -69,7 +69,8 @@ function LiveScoring() {
   const [loading, setLoading] = useState(true);
   const [isSoloPlay, setIsSoloPlay] = useState(false);
   const [isWicketDialogOpen, setIsWicketDialogOpen] = useState(false);
-  const [wicketType, setWicketType] = useState<"regular" | "run_out">("regular");
+  const [wicketType, setWicketType] = useState<string>("bowled");
+  const [caughtById, setCaughtById] = useState<string>("");
   const [dismissedPlayerId, setDismissedPlayerId] = useState<string>("");
   const [showAllOvers, setShowAllOvers] = useState(false);
 
@@ -428,16 +429,13 @@ function LiveScoring() {
       return toast.error("Select a distinct non-striker");
     }
 
-    if (isSoloPlay || isLastManActive) {
-      executeWicketBall("regular", striker);
-    } else {
-      setWicketType("regular");
-      setDismissedPlayerId(striker);
-      setIsWicketDialogOpen(true);
-    }
+    setWicketType("bowled");
+    setDismissedPlayerId(striker);
+    setCaughtById("");
+    setIsWicketDialogOpen(true);
   };
 
-  const executeWicketBall = async (wType: "regular" | "run_out", dismissedId: string) => {
+  const executeWicketBall = async (wType: string, dismissedId: string, caughtByPlayerId?: string) => {
     setIsWicketDialogOpen(false);
     if (!currentInn) return toast.error("Start an innings first");
 
@@ -469,6 +467,7 @@ function LiveScoring() {
         is_wicket: true,
         wicket_type: wType,
         is_legal: true,
+        caught_by_id: wType === "caught" ? caughtByPlayerId || null : null,
       });
 
       if (dismissedId === striker) {
@@ -1704,28 +1703,46 @@ function LiveScoring() {
               <label className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
                 Wicket Type
               </label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  variant={wicketType === "regular" ? "default" : "outline"}
-                  onClick={() => {
-                    setWicketType("regular");
-                    setDismissedPlayerId(striker);
-                  }}
-                  className="w-full text-xs font-bold rounded-lg h-9"
-                >
-                  Bowled, Caught, LBW...
-                </Button>
-                <Button
-                  type="button"
-                  variant={wicketType === "run_out" ? "default" : "outline"}
-                  onClick={() => setWicketType("run_out")}
-                  className="w-full text-xs font-bold rounded-lg h-9"
-                >
-                  Run Out
-                </Button>
-              </div>
+              <Select value={wicketType} onValueChange={(v) => {
+                setWicketType(v);
+                if (v !== "run_out") {
+                  setDismissedPlayerId(striker);
+                }
+              }}>
+                <SelectTrigger className="w-full h-9 text-xs border-border bg-card">
+                  <SelectValue placeholder="Wicket Type" />
+                </SelectTrigger>
+                <SelectContent className="bg-card border border-border text-foreground text-xs shadow-md">
+                  <SelectItem value="bowled">Bowled</SelectItem>
+                  <SelectItem value="caught">Caught (Catch Out)</SelectItem>
+                  <SelectItem value="lbw">LBW</SelectItem>
+                  <SelectItem value="stumped">Stumped</SelectItem>
+                  <SelectItem value="run_out">Run Out</SelectItem>
+                  <SelectItem value="hit_wicket">Hit Wicket</SelectItem>
+                  <SelectItem value="other">Retired / Other</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+
+            {wicketType === "caught" && (
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
+                  Catch Taken By
+                </label>
+                <Select value={caughtById} onValueChange={setCaughtById}>
+                  <SelectTrigger className="w-full h-9 text-xs border-border bg-card">
+                    <SelectValue placeholder="Select Fielder" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border border-border text-foreground text-xs shadow-md">
+                    {bowlingPlayers.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
@@ -1737,7 +1754,7 @@ function LiveScoring() {
                   variant={dismissedPlayerId === striker ? "default" : "outline"}
                   onClick={() => setDismissedPlayerId(striker)}
                   className="w-full text-xs font-semibold h-9 flex items-center justify-center gap-1.5"
-                  disabled={wicketType === "regular"}
+                  disabled={wicketType !== "run_out"}
                 >
                   Striker: {playerName(striker)}
                 </Button>
@@ -1747,7 +1764,7 @@ function LiveScoring() {
                     variant={dismissedPlayerId === nonStriker ? "default" : "outline"}
                     onClick={() => setDismissedPlayerId(nonStriker)}
                     className="w-full text-xs font-semibold h-9 flex items-center justify-center gap-1.5"
-                    disabled={wicketType === "regular"}
+                    disabled={wicketType !== "run_out"}
                   >
                     Non-Striker: {playerName(nonStriker)}
                   </Button>
@@ -1766,7 +1783,13 @@ function LiveScoring() {
             <Button
               variant="destructive"
               className="text-xs h-9 font-bold"
-              onClick={() => executeWicketBall(wicketType, dismissedPlayerId)}
+              onClick={() => {
+                if (wicketType === "caught" && !caughtById) {
+                  toast.error("Please select the fielder who took the catch");
+                  return;
+                }
+                executeWicketBall(wicketType, dismissedPlayerId, caughtById);
+              }}
               disabled={!dismissedPlayerId}
             >
               Confirm Wicket

@@ -16,6 +16,7 @@ export type Ball = {
   is_wicket: boolean;
   wicket_type: string | null;
   is_legal: boolean;
+  caught_by_id: string | null;
 };
 
 export const ballService = {
@@ -35,6 +36,7 @@ export const ballService = {
       is_wicket: boolean;
       wicket_type?: string | null;
       is_legal: boolean;
+      caught_by_id?: string | null;
     }
   ): Promise<Ball> {
     const { data } = await api.post<Ball>(`/innings/${inningsId}/balls`, ballData);

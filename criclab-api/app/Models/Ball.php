@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 #[Fillable([
     'innings_id', 'match_id', 'ball_index', 'over_number', 'ball_in_over',
     'batter_id', 'non_striker_id', 'bowler_id', 'runs', 'extra_runs',
-    'extra_type', 'is_wicket', 'wicket_type', 'is_legal'
+    'extra_type', 'is_wicket', 'wicket_type', 'is_legal', 'caught_by_id'
 ])]
 class Ball extends Model
 {
@@ -43,5 +43,10 @@ class Ball extends Model
     public function bowler()
     {
         return $this->belongsTo(Player::class, 'bowler_id');
+    }
+
+    public function caughtBy()
+    {
+        return $this->belongsTo(Player::class, 'caught_by_id');
     }
 }

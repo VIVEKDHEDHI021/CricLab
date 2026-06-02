@@ -64,6 +64,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/innings/{inningsId}/balls', [BallController::class, 'store']);
         Route::delete('/balls/{id}', [BallController::class, 'destroy']);
         Route::patch('/matches/{id}/end', [MatchController::class, 'end']);
+        Route::put('/matches/{id}', [MatchController::class, 'update']);
     });
 
     // Friend connections
