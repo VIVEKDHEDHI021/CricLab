@@ -13,6 +13,7 @@ import appCss from "../styles.css?url";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { Toaster } from "@/components/ui/sonner";
 import { SplashScreen } from "@/components/SplashScreen";
+import { TopLoadingBar } from "@/components/TopLoadingBar";
 
 function NotFoundComponent() {
   return (
@@ -139,6 +140,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <TopLoadingBar />
         <SplashScreen />
         <Outlet />
         <Toaster />

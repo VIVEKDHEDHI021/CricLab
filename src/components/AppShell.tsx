@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { echoClient, updateEchoAuth } from "@/lib/echo";
+import { PageBuffer } from "@/components/PageBuffer";
 
 export function AppShell({ children, title }: { children: ReactNode; title?: string }) {
   const { user, loading, role } = useAuth();
@@ -65,7 +66,7 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
   }, [user, queryClient]);
 
   if (loading || !user) {
-    return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading…</div>;
+    return <PageBuffer />;
   }
 
   const tabs = [
