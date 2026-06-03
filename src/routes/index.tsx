@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { authService } from "@/lib/services/authService";
-import { setToken } from "@/lib/api";
+import { setToken, getToken } from "@/lib/api";
 import { useAuth, Role } from "@/hooks/useAuth";
 import { updateEchoAuth } from "@/lib/echo";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -82,12 +82,13 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
   }, []);
 
   useEffect(() => {
-    if (gsiLoaded && window.google) {
+    if (gsiLoaded && window.google && !getToken()) {
       const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
       if (!clientId) return;
 
       window.google.accounts.id.initialize({
         client_id: clientId,
+        auto_select: true,
         callback: async (response: any) => {
           setBusy(true);
           try {
@@ -113,6 +114,7 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
             btnEl,
             { theme: "outline", size: "large", text: "signin_with", shape: "rectangular", width: 350 }
           );
+          window.google.accounts.id.prompt();
         }
       }, 50);
 

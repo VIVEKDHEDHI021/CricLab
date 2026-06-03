@@ -62,6 +62,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore logout errors
     }
+    if (typeof window !== "undefined" && (window as any).google?.accounts?.id) {
+      try {
+        (window as any).google.accounts.id.disableAutoSelect();
+      } catch (err) {
+        console.error("Failed to disable Google auto select:", err);
+      }
+    }
     clearToken();
     setUser(null);
     setRole(null);
