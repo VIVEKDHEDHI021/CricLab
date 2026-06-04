@@ -16,20 +16,24 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         // 1. Create Admin User
-        $admin = User::create([
-            'name' => 'Admin User',
-            'mobile' => '9999999999',
-            'password' => Hash::make('admin123'),
-            'role' => 'admin',
-        ]);
+        $admin = User::updateOrCreate(
+            ['mobile' => '9999999999'],
+            [
+                'name' => 'Admin User',
+                'password' => Hash::make('admin123'),
+                'role' => 'admin',
+            ]
+        );
 
         // 2. Create Scorer User (normal user)
-        $scorer = User::create([
-            'name' => 'Scorer User',
-            'mobile' => '8888888888',
-            'password' => Hash::make('user123'),
-            'role' => 'user',
-        ]);
+        $scorer = User::updateOrCreate(
+            ['mobile' => '8888888888'],
+            [
+                'name' => 'Scorer User',
+                'password' => Hash::make('user123'),
+                'role' => 'user',
+            ]
+        );
 
         // 3. Create Teams
         $mi = Team::create([
