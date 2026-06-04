@@ -6,7 +6,7 @@ use App\Traits\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 
-#[Fillable(['name', 'team_id', 'mobile', 'user_id', 'avatar', 'role', 'batting_style', 'bowling_style', 'jersey_number', 'catches', 'run_outs'])]
+#[Fillable(['name', 'team_id', 'mobile', 'user_id', 'avatar', 'role', 'batting_style', 'bowling_style', 'jersey_number', 'catches', 'run_outs', 'age', 'city'])]
 class Player extends Model
 {
     use HasUuid;

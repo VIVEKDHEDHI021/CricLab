@@ -22,6 +22,8 @@ export type Player = {
   jersey_number?: string;
   catches?: number;
   run_outs?: number;
+  age?: number;
+  city?: string;
   stats?: PlayerStats;
   created_at?: string;
 };

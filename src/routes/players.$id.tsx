@@ -44,6 +44,8 @@ function PlayerProfilePage() {
     jersey_number: "",
     catches: 0,
     run_outs: 0,
+    age: "" as string | number,
+    city: "",
   });
   const [saving, setSaving] = useState(false);
 
@@ -63,6 +65,8 @@ function PlayerProfilePage() {
         jersey_number: data.player.jersey_number || "",
         catches: data.player.catches || 0,
         run_outs: data.player.run_outs || 0,
+        age: data.player.age ?? "",
+        city: data.player.city || "",
       });
 
       // Fetch friends for connection check
@@ -126,7 +130,11 @@ function PlayerProfilePage() {
     e.preventDefault();
     setSaving(true);
     try {
-      await playerService.updatePlayerProfile(id, editForm);
+      const dataToSend = {
+        ...editForm,
+        age: editForm.age === "" ? null : Number(editForm.age),
+      };
+      await playerService.updatePlayerProfile(id, dataToSend);
       toast.success("Profile updated successfully!");
       setIsEditOpen(false);
       fetchProfile();
@@ -201,6 +209,16 @@ function PlayerProfilePage() {
                 )}
               </div>
             </div>
+            <div className="flex space-x-1">
+              <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground" onClick={handleShare}>
+                <Share2 className="h-4 w-4" />
+              </Button>
+              {isOwnerOrAdmin && (
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-primary" onClick={() => setIsEditOpen(true)}>
+                  <Edit className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Quick Stats Summary Grid */}
@@ -258,12 +276,28 @@ function PlayerProfilePage() {
               </h3>
               <div className="grid grid-cols-2 gap-4 text-xs">
                 <div>
+                  <span className="text-muted-foreground">Player Role</span>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.role || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Age</span>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.age ? `${player.age} years` : "—"}</p>
+                </div>
+                <div>
                   <span className="text-muted-foreground">Batting Style</span>
                   <p className="font-semibold mt-0.5 text-foreground">{player.batting_style || "—"}</p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Bowling Style</span>
                   <p className="font-semibold mt-0.5 text-foreground">{player.bowling_style || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Hometown / City</span>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.city || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Jersey Number</span>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.jersey_number ? `#${player.jersey_number}` : "—"}</p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Catches</span>
@@ -500,6 +534,7 @@ function PlayerProfilePage() {
                   onChange={e => setEditForm({ ...editForm, name: e.target.value })}
                   placeholder="Full Name"
                   required
+                  className="bg-background border-border"
                 />
               </div>
 
@@ -510,6 +545,8 @@ function PlayerProfilePage() {
                   value={editForm.mobile}
                   onChange={e => setEditForm({ ...editForm, mobile: e.target.value })}
                   placeholder="Mobile number"
+                  className="bg-background border-border"
+                  disabled
                 />
               </div>
 
@@ -580,12 +617,37 @@ function PlayerProfilePage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
+                  <Label htmlFor="edit-age">Age</Label>
+                  <Input
+                    id="edit-age"
+                    type="number"
+                    value={editForm.age}
+                    onChange={e => setEditForm({ ...editForm, age: e.target.value === "" ? "" : parseInt(e.target.value) || "" })}
+                    placeholder="e.g. 25"
+                    className="bg-background border-border"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-city">City / Hometown</Label>
+                  <Input
+                    id="edit-city"
+                    value={editForm.city}
+                    onChange={e => setEditForm({ ...editForm, city: e.target.value })}
+                    placeholder="e.g. Mumbai"
+                    className="bg-background border-border"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
                   <Label htmlFor="edit-catches">Catches (Override)</Label>
                   <Input
                     id="edit-catches"
                     type="number"
                     value={editForm.catches}
                     onChange={e => setEditForm({ ...editForm, catches: parseInt(e.target.value) || 0 })}
+                    className="bg-background border-border"
                   />
                 </div>
                 <div className="space-y-1">
@@ -595,6 +657,7 @@ function PlayerProfilePage() {
                     type="number"
                     value={editForm.run_outs}
                     onChange={e => setEditForm({ ...editForm, run_outs: parseInt(e.target.value) || 0 })}
+                    className="bg-background border-border"
                   />
                 </div>
               </div>

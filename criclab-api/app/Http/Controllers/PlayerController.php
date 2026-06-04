@@ -51,6 +51,8 @@ class PlayerController extends Controller
                 'user_id' => $p->user_id,
                 'avatar' => $p->avatar,
                 'role' => $p->role,
+                'age' => $p->age,
+                'city' => $p->city,
                 'stats' => [
                     'matches' => $matchesCount,
                     'runs' => $runs,
@@ -120,6 +122,8 @@ class PlayerController extends Controller
                 'user_id' => $p->user_id,
                 'avatar' => $p->avatar,
                 'role' => $p->role,
+                'age' => $p->age,
+                'city' => $p->city,
                 'stats' => [
                     'matches' => $matchesCount,
                     'runs' => $runs,
@@ -337,13 +341,15 @@ class PlayerController extends Controller
             'jersey_number' => 'nullable|string',
             'catches' => 'nullable|integer|min:0',
             'run_outs' => 'nullable|integer|min:0',
+            'age' => 'nullable|integer|min:0|max:150',
+            'city' => 'nullable|string|max:255',
             'mobile' => 'nullable|string',
             'team_id' => 'nullable|uuid|exists:teams,id',
         ]);
 
         $player->update($request->only([
             'name', 'avatar', 'role', 'batting_style',
-            'bowling_style', 'jersey_number', 'catches', 'run_outs', 'mobile', 'team_id'
+            'bowling_style', 'jersey_number', 'catches', 'run_outs', 'age', 'city', 'mobile', 'team_id'
         ]));
 
         if ($player->user_id && $request->has('name')) {

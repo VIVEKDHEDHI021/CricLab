@@ -30,6 +30,7 @@ import {
   Save,
   ChevronDown,
   ChevronUp,
+  ArrowUpDown,
 } from "lucide-react";
 
 export const Route = createFileRoute("/matches/$id/score")({ component: LiveScoring });
@@ -393,6 +394,21 @@ function LiveScoring() {
     }
     return disabled;
   }, [currentInn, innBalls]);
+
+  const swapStrike = () => {
+    if (isSoloPlay || isLastManActive) {
+      toast.error("Cannot swap strike in solo play / last man active mode");
+      return;
+    }
+    if (!striker || !nonStriker) {
+      toast.error("Both striker and non-striker must be selected to swap strike");
+      return;
+    }
+    const temp = striker;
+    setStriker(nonStriker);
+    setNonStriker(temp);
+    toast.success("Strike swapped!");
+  };
 
   const startInnings = async (battingTeamId: string) => {
     if (!match) return;
@@ -1262,6 +1278,19 @@ function LiveScoring() {
                     <RotateCcw className="h-3 w-3" />
                     Undo
                   </Button>
+                  {!isSoloPlay && !isLastManActive && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={swapStrike}
+                      disabled={isInningsOver || !striker || !nonStriker}
+                      className="h-8 text-xs font-semibold px-4 border border-border/40 text-muted-foreground bg-card hover:bg-muted/40 rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <ArrowUpDown className="h-3.5 w-3.5 text-primary" />
+                      Swap Strike
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"

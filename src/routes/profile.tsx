@@ -40,6 +40,8 @@ function UserProfilePage() {
     jersey_number: "",
     catches: 0,
     run_outs: 0,
+    age: "" as string | number,
+    city: "",
   });
   const [saving, setSaving] = useState(false);
 
@@ -169,6 +171,8 @@ function UserProfilePage() {
           jersey_number: data.player.jersey_number || "",
           catches: data.player.catches || 0,
           run_outs: data.player.run_outs || 0,
+          age: data.player.age ?? "",
+          city: data.player.city || "",
         });
       } else {
         setProfile(null);
@@ -217,7 +221,11 @@ function UserProfilePage() {
     if (!profile) return;
     setSaving(true);
     try {
-      await playerService.updatePlayerProfile(profile.player.id, editForm);
+      const dataToSend = {
+        ...editForm,
+        age: editForm.age === "" ? null : Number(editForm.age),
+      };
+      await playerService.updatePlayerProfile(profile.player.id, dataToSend);
       toast.success("Profile updated successfully!");
       setIsEditOpen(false);
       fetchProfile();
@@ -373,12 +381,28 @@ function UserProfilePage() {
               </h3>
               <div className="grid grid-cols-2 gap-4 text-xs">
                 <div>
+                  <span className="text-muted-foreground">Player Role</span>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.role || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Age</span>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.age ? `${player.age} years` : "—"}</p>
+                </div>
+                <div>
                   <span className="text-muted-foreground">Batting Style</span>
                   <p className="font-semibold mt-0.5 text-foreground">{player.batting_style || "—"}</p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Bowling Style</span>
                   <p className="font-semibold mt-0.5 text-foreground">{player.bowling_style || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Hometown / City</span>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.city || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Jersey Number</span>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.jersey_number ? `#${player.jersey_number}` : "—"}</p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Catches</span>
@@ -694,6 +718,30 @@ function UserProfilePage() {
                       <SelectItem value="None">None</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="edit-age">Age</Label>
+                  <Input
+                    id="edit-age"
+                    type="number"
+                    value={editForm.age}
+                    onChange={e => setEditForm({ ...editForm, age: e.target.value === "" ? "" : parseInt(e.target.value) || "" })}
+                    placeholder="e.g. 25"
+                    className="bg-background border-border"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-city">City / Hometown</Label>
+                  <Input
+                    id="edit-city"
+                    value={editForm.city}
+                    onChange={e => setEditForm({ ...editForm, city: e.target.value })}
+                    placeholder="e.g. Mumbai"
+                    className="bg-background border-border"
+                  />
                 </div>
               </div>
 
