@@ -69,6 +69,7 @@ function LiveScoring() {
   const [bowler, setBowler] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [isSoloPlay, setIsSoloPlay] = useState(false);
+  const [initializedInningsId, setInitializedInningsId] = useState<string | null>(null);
   const [isWicketDialogOpen, setIsWicketDialogOpen] = useState(false);
   const [wicketType, setWicketType] = useState<string>("bowled");
   const [caughtById, setCaughtById] = useState<string>("");
@@ -233,8 +234,12 @@ function LiveScoring() {
         }
       }
 
-      if (lastBall.batter_id && !lastBall.non_striker_id && !isLastManRemaining) {
-        setIsSoloPlay(true);
+      // Only auto-initialize isSoloPlay when this innings loads for the first time
+      if (currentInn && initializedInningsId !== currentInn.id) {
+        if (lastBall.batter_id && !lastBall.non_striker_id && !isLastManRemaining) {
+          setIsSoloPlay(true);
+        }
+        setInitializedInningsId(currentInn.id);
       }
 
       if (!striker && expectedStriker && !outBatterIds.has(expectedStriker)) {
@@ -251,8 +256,11 @@ function LiveScoring() {
       if (!bowler && lastBall.bowler_id && !isEndOfOver) {
         setBowler(lastBall.bowler_id);
       }
+    } else if (currentInn && initializedInningsId !== currentInn.id) {
+      // If there are no balls yet, reset/initialize state for the new innings
+      setInitializedInningsId(currentInn.id);
     }
-  }, [innBalls, outBatterIds, striker, nonStriker, bowler, isLastManRemaining, isSoloPlay]);
+  }, [innBalls, outBatterIds, striker, nonStriker, bowler, isLastManRemaining, isSoloPlay, currentInn, initializedInningsId]);
 
   const isLastManActive = useMemo(() => {
     return !!(
@@ -1369,8 +1377,9 @@ function LiveScoring() {
                       : "border-border text-muted-foreground hover:bg-muted"
                   }`}
                   onClick={() => {
-                    setIsSoloPlay(!isSoloPlay);
-                    if (!isSoloPlay) {
+                    const nextSoloPlay = !isSoloPlay;
+                    setIsSoloPlay(nextSoloPlay);
+                    if (nextSoloPlay) {
                       setNonStriker("");
                     }
                   }}

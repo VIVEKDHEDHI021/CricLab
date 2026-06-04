@@ -1011,6 +1011,46 @@ function MatchDetails() {
           </DialogHeader>
           <form onSubmit={handleAddPlayerSubmit} className="space-y-4 py-2">
             
+            {/* Select Existing Player Dropdown */}
+            <div className="space-y-1.5">
+              <Label>Select Existing Player</Label>
+              <select
+                value={selectedExistingPlayer?.id || ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "") {
+                    setSelectedExistingPlayer(null);
+                    setPlayerSearchQuery("");
+                    setPlayerMobile("");
+                  } else {
+                    const found = allAppPlayers.find(p => p.id === val);
+                    if (found) {
+                      handleSelectRecommendation(found);
+                    }
+                  }
+                }}
+                className="w-full h-10 px-3 py-2 text-xs border border-border bg-background rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">-- Select from existing players --</option>
+                {allAppPlayers
+                  .filter(p => p.team_id !== targetTeamId)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} {p.mobile ? `(${p.mobile})` : ""} {p.team_name ? `[Team: ${p.team_name}]` : "[No Team]"}
+                    </option>
+                  ))}
+              </select>
+              <p className="text-[10px] text-muted-foreground">
+                Quickly select a player from the database to add or transfer to this squad.
+              </p>
+            </div>
+
+            <div className="relative flex py-1 items-center">
+              <div className="flex-grow border-t border-border/60"></div>
+              <span className="flex-shrink mx-4 text-muted-foreground text-[10px] font-bold uppercase tracking-wider">Or Create New</span>
+              <div className="flex-grow border-t border-border/60"></div>
+            </div>
+
             {/* Player Search Input */}
             <div className="space-y-1 relative">
               <Label htmlFor="player-search">Player Name</Label>
