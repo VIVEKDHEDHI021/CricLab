@@ -112,6 +112,15 @@ function LiveScoring() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [actionLock, setActionLock] = useState(false);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
+
+  useEffect(() => {
+    if (cooldownRemaining <= 0) return;
+    const timer = setTimeout(() => {
+      setCooldownRemaining((prev) => prev - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [cooldownRemaining]);
   
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -137,6 +146,7 @@ function LiveScoring() {
   const [caughtById, setCaughtById] = useState<string>("");
   const [dismissedPlayerId, setDismissedPlayerId] = useState<string>("");
   const [showAllOvers, setShowAllOvers] = useState(false);
+  const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
 
   const canScore = role === "admin" || (user && match && match.created_by === user.id);
   const playerName = (pid: string) => players.find((p) => p.id === pid)?.name ?? "—";
@@ -659,6 +669,19 @@ function LiveScoring() {
     }
   };
 
+  const endInnings = async () => {
+    if (!currentInn) return;
+    if (!confirm("Are you sure you want to end this innings manually?")) return;
+    try {
+      await inningsService.closeInnings(currentInn.id);
+      toast.success("Innings manually closed");
+      setIsMoreOptionsOpen(false);
+      reload();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message);
+    }
+  };
+
   const handleWicketClick = () => {
     if (!currentInn) return toast.error("Start an innings first");
 
@@ -674,9 +697,10 @@ function LiveScoring() {
   };
 
   const executeWicketBall = async (wType: string, dismissedId: string, caughtByPlayerId?: string) => {
-    if (actionLock) return;
+    if (actionLock || cooldownRemaining > 0) return;
     setActionLock(true);
     setTimeout(() => setActionLock(false), 350);
+    setCooldownRemaining(3);
 
     setIsWicketDialogOpen(false);
     if (!currentInn) return toast.error("Start an innings first");
@@ -770,13 +794,14 @@ function LiveScoring() {
     kind: "run" | "wide" | "no_ball" | "bye" | "leg_bye" | "wicket",
     runs = 0,
   ) => {
-    if (actionLock) return;
+    if (actionLock || cooldownRemaining > 0) return;
     if (kind === "wicket") {
       handleWicketClick();
       return;
     }
     setActionLock(true);
     setTimeout(() => setActionLock(false), 350);
+    setCooldownRemaining(3);
 
     if (!currentInn) return toast.error("Start an innings first");
 
@@ -1229,42 +1254,45 @@ function LiveScoring() {
           )
         )}
       </div>
-      <div className="flex items-center gap-2 md:gap-4">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         {canScore && currentInn && (
           <button
             onClick={undo}
             disabled={innBalls.length === 0}
-            className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 disabled:opacity-40 hover:bg-white/10 py-1 px-2 rounded-lg transition-all cursor-pointer"
+            className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 disabled:opacity-40 hover:bg-white/10 py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer"
+            title="Undo"
           >
             <RotateCcw className="h-4 w-4" />
-            <span>Undo</span>
+            <span className="hidden sm:inline">Undo</span>
           </button>
         )}
         <button
           onClick={handleManualRefresh}
           disabled={isRefreshing}
-          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 disabled:opacity-40 hover:bg-white/10 py-1 px-2 rounded-lg transition-all cursor-pointer"
+          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 disabled:opacity-40 hover:bg-white/10 py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer"
           title="Refresh Scoreboard"
         >
           <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-          <span>Refresh</span>
+          <span className="hidden sm:inline">Refresh</span>
         </button>
         <button
-          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 hover:bg-white/10 py-1 px-2 rounded-lg transition-all cursor-pointer"
-          onClick={() => toast.info("Scoring settings & details")}
+          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 hover:bg-white/10 py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer"
+          onClick={() => setIsMoreOptionsOpen(true)}
+          title="Options"
         >
           <MoreHorizontal className="h-4 w-4" />
-          <span>More</span>
+          <span className="hidden sm:inline">Options</span>
         </button>
         <button
           onClick={() => {
             toast.success("Match status saved!");
             nav({ to: "/matches/$id", params: { id } });
           }}
-          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 hover:bg-white/10 py-1 px-2 rounded-lg transition-all cursor-pointer"
+          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 hover:bg-white/10 py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer"
+          title="Save & Exit"
         >
           <Save className="h-4 w-4" />
-          <span>Save</span>
+          <span className="hidden sm:inline">Save</span>
         </button>
       </div>
     </div>
@@ -1536,7 +1564,29 @@ function LiveScoring() {
 
             {/* Scoring Panel Buttons (Interactive modifier layout - no modals, fast taps) */}
             {canScore && (
-              <div className={`space-y-3 transition-all duration-200 ${actionLock ? "pointer-events-none opacity-50" : ""}`}>
+              <div className="space-y-3">
+                {/* Cooldown / Ready Status Banner */}
+                {cooldownRemaining > 0 ? (
+                  <div className="bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-xl py-2.5 px-3 flex items-center justify-between text-xs font-semibold select-none">
+                    <span className="flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-amber-500 animate-ping"></span>
+                      Next ball ready in {cooldownRemaining}s...
+                    </span>
+                    <div className="w-16 bg-amber-500/20 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-amber-500 h-full transition-all duration-1000 ease-linear"
+                        style={{ width: `${(cooldownRemaining / 3) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl py-2 px-3 flex items-center gap-2 text-xs font-semibold select-none">
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" />
+                    <span>Ready for new ball</span>
+                  </div>
+                )}
+
+                <div className={`space-y-3 transition-all duration-200 ${actionLock || cooldownRemaining > 0 ? "pointer-events-none opacity-50" : ""}`}>
                 {/* Modifier Helper Banner */}
                 {activeExtraKind && (
                   <div className="bg-primary/10 border border-primary/20 text-primary rounded-xl py-2 px-3 flex items-center justify-between text-xs animate-pulse">
@@ -1787,6 +1837,7 @@ function LiveScoring() {
                     Leg Byes
                   </Button>
                 </div>
+              </div>
               </div>
             )}
 
@@ -2298,6 +2349,78 @@ function LiveScoring() {
               disabled={!dismissedPlayerId}
             >
               Confirm Wicket
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Scoring Options Dialog Modal */}
+      <Dialog open={isMoreOptionsOpen} onOpenChange={setIsMoreOptionsOpen}>
+        <DialogContent className="max-w-md bg-card border border-border text-foreground rounded-2xl shadow-xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-extrabold">Scoring Options</DialogTitle>
+          </DialogHeader>
+
+          <div className="py-4 space-y-4">
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Innings Control</p>
+              <div className="grid grid-cols-1 gap-2">
+                {currentInn && !currentInn.is_closed && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-start gap-2 h-10 border-amber-500/30 text-amber-500 hover:bg-amber-500/10 hover:text-amber-500 font-semibold"
+                    onClick={endInnings}
+                  >
+                    <span className="h-2 w-2 rounded-full bg-amber-500" />
+                    End Current Innings
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-start gap-2 h-10 border-red-500/30 text-red-500 hover:bg-red-500/10 hover:text-red-500 font-semibold"
+                  onClick={endMatch}
+                >
+                  <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                  End Match (Declare Result)
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-1 pt-2 border-t border-border/30">
+              <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Scoring Mode</p>
+              <div className="flex items-center justify-between py-1.5">
+                <span className="text-xs font-semibold text-muted-foreground">Solo Play (Single Batsman)</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSoloPlay((prev) => !prev);
+                    toast.success(`Solo play mode ${!isSoloPlay ? "enabled" : "disabled"}`);
+                  }}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    isSoloPlay ? "bg-primary" : "bg-muted"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      isSoloPlay ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2 justify-end pt-2 border-t border-border/30">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsMoreOptionsOpen(false)}
+              className="h-8 text-xs font-semibold rounded-lg"
+            >
+              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>
