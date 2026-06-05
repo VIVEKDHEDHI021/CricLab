@@ -32,9 +32,33 @@ import {
   ChevronUp,
   ArrowUpDown,
   RefreshCw,
+  Cloud,
+  CloudOff,
+  CheckCircle2,
 } from "lucide-react";
 
 export const Route = createFileRoute("/matches/$id/score")({ component: LiveScoring });
+
+interface BallEvent {
+  id: string;
+  matchId: string;
+  inningsId: string;
+  ballIndex: number;
+  overNumber: number;
+  ballInOver: number;
+  batterId: string;
+  nonStrikerId: string | null;
+  bowlerId: string;
+  runs: number;
+  extraRuns: number;
+  extraType: "wide" | "no_ball" | "bye" | "leg_bye" | null;
+  isWicket: boolean;
+  wicketType: string | null;
+  isLegal: boolean;
+  caughtById: string | null;
+  timestamp: number;
+  synced: boolean;
+}
 
 type Match = any;
 type Inn = any;
@@ -70,6 +94,13 @@ function LiveScoring() {
   const [bowler, setBowler] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Optimistic UI & Sync states
+  const [localEvents, setLocalEvents] = useState<BallEvent[]>([]);
+  const [undoneBallIds, setUndoneBallIds] = useState<string[]>([]);
+  const [activeExtraKind, setActiveExtraKind] = useState<"wide" | "no_ball" | "bye" | "leg_bye" | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -100,6 +131,108 @@ function LiveScoring() {
   const playerName = (pid: string) => players.find((p) => p.id === pid)?.name ?? "—";
 
   const [isLiveSync, setIsLiveSync] = useState(false);
+
+  // 1. Tactile Haptic Feedback
+  const triggerHaptic = () => {
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      try {
+        navigator.vibrate(40);
+      } catch (e) {
+        // ignore
+      }
+    }
+  };
+
+  // 2. Local Storage Persistence & Recovery
+  useEffect(() => {
+    const saved = localStorage.getItem(`criclab_unsynced_events_${id}`);
+    if (saved) {
+      try {
+        setLocalEvents(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to parse saved unsynced events", e);
+      }
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (localEvents.length > 0) {
+      localStorage.setItem(`criclab_unsynced_events_${id}`, JSON.stringify(localEvents));
+    } else {
+      localStorage.removeItem(`criclab_unsynced_events_${id}`);
+    }
+  }, [localEvents, id]);
+
+  // 3. Clear synced events once they are present in the server's balls list
+  useEffect(() => {
+    if (balls.length > 0 && localEvents.length > 0) {
+      setLocalEvents((prev) =>
+        prev.filter((le) => {
+          if (!le.synced) return true;
+          const serverHasIt = balls.some((b) => b.ball_index === le.ballIndex && b.innings_id === le.inningsId);
+          return !serverHasIt;
+        })
+      );
+    }
+  }, [balls]);
+
+  // 4. Background Sync Engine
+  useEffect(() => {
+    let active = true;
+    
+    const syncNextEvent = async () => {
+      const pending = localEvents.find((e) => !e.synced);
+      if (!pending) {
+        if (syncing) setSyncing(false);
+        return;
+      }
+      
+      setSyncing(true);
+      setSyncError(null);
+      
+      try {
+        await ballService.addBall(pending.inningsId, {
+          match_id: pending.matchId,
+          ball_index: pending.ballIndex,
+          over_number: pending.overNumber,
+          ball_in_over: pending.ballInOver,
+          batter_id: pending.batterId,
+          non_striker_id: pending.nonStrikerId,
+          bowler_id: pending.bowlerId,
+          runs: pending.runs,
+          extra_runs: pending.extraRuns,
+          extra_type: pending.extraType,
+          is_wicket: pending.isWicket,
+          wicket_type: pending.wicketType,
+          is_legal: pending.isLegal,
+          caught_by_id: pending.caughtById,
+        });
+        
+        if (!active) return;
+        
+        // Mark as synced locally
+        setLocalEvents((prev) =>
+          prev.map((e) => (e.id === pending.id ? { ...e, synced: true } : e))
+        );
+      } catch (err: any) {
+        if (!active) return;
+        console.error("Failed to sync event", pending, err);
+        setSyncing(false);
+        setSyncError(err.response?.data?.message || err.message || "Network Error");
+        
+        // Auto-retry after 3 seconds
+        setTimeout(() => {
+          if (active) syncNextEvent();
+        }, 3000);
+      }
+    };
+
+    syncNextEvent();
+
+    return () => {
+      active = false;
+    };
+  }, [localEvents]);
 
   const reload = async () => {
     try {
@@ -141,17 +274,68 @@ function LiveScoring() {
     };
   }, [id]);
 
+  // 5. Combine server balls with unsynced local events (optimistic view)
+  const combinedBalls = useMemo(() => {
+    const list = balls.filter((b) => !undoneBallIds.includes(b.id));
+    const unsynced = localEvents.filter((e) => !e.synced);
+    
+    unsynced.forEach((event) => {
+      if (!list.some((b) => b.ball_index === event.ballIndex && b.innings_id === event.inningsId)) {
+        list.push({
+          id: event.id,
+          match_id: event.matchId,
+          innings_id: event.inningsId,
+          ball_index: event.ballIndex,
+          over_number: event.overNumber,
+          ball_in_over: event.ballInOver,
+          batter_id: event.batterId,
+          non_striker_id: event.nonStrikerId,
+          bowler_id: event.bowlerId,
+          runs: event.runs,
+          extra_runs: event.extraRuns,
+          extra_type: event.extraType,
+          is_wicket: event.isWicket,
+          wicket_type: event.wicketType,
+          is_legal: event.isLegal,
+          caught_by_id: event.caughtById,
+          created_at: new Date(event.timestamp).toISOString(),
+        });
+      }
+    });
+    
+    return list.sort((a, b) => a.ball_index - b.ball_index);
+  }, [balls, localEvents, undoneBallIds]);
+
+  // 6. Calculate optimistic Innings state
+  const optimisticInnings = useMemo(() => {
+    return innings.map((inn) => {
+      const innEvents = combinedBalls.filter((b) => b.innings_id === inn.id);
+      const runs = innEvents.reduce((sum, b) => sum + (b.runs ?? 0) + (b.extra_runs ?? 0), 0);
+      const wickets = innEvents.filter((b) => b.is_wicket).length;
+      const legal_balls = innEvents.filter((b) => b.is_legal).length;
+      return {
+        ...inn,
+        runs,
+        wickets,
+        legal_balls,
+      };
+    });
+  }, [innings, combinedBalls]);
+
   const currentInn = useMemo(
     () =>
-      innings.find((i) => i.innings_no === match?.current_innings && !i.is_closed) ||
-      innings[innings.length - 1],
-    [innings, match],
+      optimisticInnings.find((i) => i.innings_no === match?.current_innings && !i.is_closed) ||
+      optimisticInnings[optimisticInnings.length - 1],
+    [optimisticInnings, match],
   );
   const battingTeam = currentInn?.batting_team_id;
   const bowlingTeam = currentInn?.bowling_team_id;
   const battingPlayers = players.filter((p) => p.team_id === battingTeam);
   const bowlingPlayers = players.filter((p) => p.team_id === bowlingTeam);
-  const innBalls = balls.filter((b) => b.innings_id === currentInn?.id);
+  const innBalls = useMemo(() => {
+    return combinedBalls.filter((b) => b.innings_id === currentInn?.id);
+  }, [combinedBalls, currentInn]);
+  
 
   const outBatterIds = useMemo(() => {
     return new Set(
@@ -170,7 +354,7 @@ function LiveScoring() {
     return !!(match?.last_man_batting && activeBattingPlayers.length === 1);
   }, [match, activeBattingPlayers]);
 
-  const firstInnings = useMemo(() => innings.find((i) => i.innings_no === 1), [innings]);
+  const firstInnings = useMemo(() => optimisticInnings.find((i) => i.innings_no === 1), [optimisticInnings]);
 
   const isInningsOver = useMemo(() => {
     if (!currentInn || !match) return false;
@@ -496,59 +680,65 @@ function LiveScoring() {
     const overNo = Math.floor(legalCount / 6);
     const ballInOver = (legalCount % 6) + 1;
 
-    try {
-      await ballService.addBall(currentInn.id, {
-        match_id: id,
-        ball_index: ballIndex,
-        over_number: overNo,
-        ball_in_over: ballInOver,
-        batter_id: actualBatterId,
-        non_striker_id: isSoloPlay || isLastManActive ? null : actualNonStrikerId,
-        bowler_id: bowler,
-        runs: 0,
-        extra_runs: 0,
-        extra_type: null,
-        is_wicket: true,
-        wicket_type: wType,
-        is_legal: true,
-        caught_by_id: wType === "caught" ? caughtByPlayerId || null : null,
-      });
+    const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-      if (dismissedId === striker) {
-        setStriker("");
-        toast.info("Wicket! Select new batsman");
-      } else {
-        setNonStriker("");
-        toast.info("Wicket! Select new non-striker");
-      }
+    const newEvent: BallEvent = {
+      id: localId,
+      matchId: id,
+      inningsId: currentInn.id,
+      ballIndex,
+      overNumber: overNo,
+      ballInOver,
+      batterId: actualBatterId,
+      nonStrikerId: isSoloPlay || isLastManActive ? null : actualNonStrikerId,
+      bowlerId: bowler,
+      runs: 0,
+      extraRuns: 0,
+      extraType: null,
+      isWicket: true,
+      wicketType: wType,
+      isLegal: true,
+      caughtById: wType === "caught" ? caughtByPlayerId || null : null,
+      timestamp: Date.now(),
+      synced: false,
+    };
 
-      const newLegal = currentInn.legal_balls + 1;
-      if (newLegal % 6 === 0) {
-        if (!isSoloPlay && !isLastManActive) {
-          const currentS = dismissedId === striker ? "" : striker;
-          const currentNS = dismissedId === striker ? nonStriker : "";
-          setStriker(currentNS);
-          setNonStriker(currentS);
-        }
-        setBowler("");
-        toast.success("End of over");
-      }
+    // Instant tactile/visual feedback
+    triggerHaptic();
 
-      const newWickets = currentInn.wickets + 1;
-      const maxWickets =
-        battingPlayers.length > 0
-          ? match.last_man_batting
-            ? battingPlayers.length
-            : battingPlayers.length - 1
-          : 10;
-      if (newLegal >= match.overs * 6 || newWickets >= maxWickets || newWickets >= 10) {
-        toast.success("Innings closed");
-      }
-
-      reload();
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message);
+    if (dismissedId === striker) {
+      setStriker("");
+      toast.info("Wicket! Select new batsman");
+    } else {
+      setNonStriker("");
+      toast.info("Wicket! Select new non-striker");
     }
+
+    const newLegal = currentInn.legal_balls + 1;
+    if (newLegal % 6 === 0) {
+      if (!isSoloPlay && !isLastManActive) {
+        const currentS = dismissedId === striker ? "" : striker;
+        const currentNS = dismissedId === striker ? nonStriker : "";
+        setStriker(currentNS);
+        setNonStriker(currentS);
+      }
+      setBowler("");
+      toast.success("End of over");
+    }
+
+    const newWickets = currentInn.wickets + 1;
+    const maxWickets =
+      battingPlayers.length > 0
+        ? match.last_man_batting
+          ? battingPlayers.length
+          : battingPlayers.length - 1
+        : 10;
+    if (newLegal >= match.overs * 6 || newWickets >= maxWickets || newWickets >= 10) {
+      toast.success("Innings closed");
+    }
+
+    // Save event locally
+    setLocalEvents((prev) => [...prev, newEvent]);
   };
 
   const addBall = async (
@@ -593,68 +783,93 @@ function LiveScoring() {
     const overNo = Math.floor(legalCount / 6);
     const ballInOver = (legalCount % 6) + (isLegal ? 1 : 0);
 
-    try {
-      await ballService.addBall(currentInn.id, {
-        match_id: id,
-        ball_index: ballIndex,
-        over_number: overNo,
-        ball_in_over: isLegal ? ballInOver : (legalCount % 6) + 1,
-        batter_id: striker,
-        non_striker_id: isSoloPlay || isLastManActive ? null : nonStriker,
-        bowler_id: bowler,
-        runs: batterRuns,
-        extra_runs: extraRuns,
-        extra_type: extraType,
-        is_wicket: isWicket,
-        is_legal: isLegal,
-      });
+    const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-      // strike rotation on odd batter runs (not on wide; on no_ball with runs yes)
-      if (
-        !isSoloPlay &&
-        !isLastManActive &&
-        (kind === "run" || kind === "bye" || kind === "leg_bye" || kind === "no_ball") &&
-        batterRuns % 2 === 1
-      ) {
+    const newEvent: BallEvent = {
+      id: localId,
+      matchId: id,
+      inningsId: currentInn.id,
+      ballIndex,
+      overNumber: overNo,
+      ballInOver: isLegal ? ballInOver : (legalCount % 6) + 1,
+      batterId: striker,
+      nonStrikerId: isSoloPlay || isLastManActive ? null : nonStriker,
+      bowlerId: bowler,
+      runs: batterRuns,
+      extraRuns,
+      extraType: extraType as any,
+      isWicket,
+      wicketType: null,
+      isLegal,
+      caughtById: null,
+      timestamp: Date.now(),
+      synced: false,
+    };
+
+    // Instant tactile/visual feedback
+    triggerHaptic();
+
+    // strike rotation on odd batter runs (not on wide; on no_ball with runs yes)
+    if (
+      !isSoloPlay &&
+      !isLastManActive &&
+      (kind === "run" || kind === "bye" || kind === "leg_bye" || kind === "no_ball") &&
+      batterRuns % 2 === 1
+    ) {
+      setStriker(nonStriker);
+      setNonStriker(striker);
+    }
+    // end of over swap
+    const newLegal = currentInn.legal_balls + (isLegal ? 1 : 0);
+    if (isLegal && newLegal % 6 === 0) {
+      if (!isSoloPlay && !isLastManActive) {
         setStriker(nonStriker);
         setNonStriker(striker);
       }
-      // end of over swap
-      const newLegal = currentInn.legal_balls + (isLegal ? 1 : 0);
-      if (isLegal && newLegal % 6 === 0) {
-        if (!isSoloPlay && !isLastManActive) {
-          setStriker(nonStriker);
-          setNonStriker(striker);
-        }
-        setBowler("");
-        toast.success("End of over");
-      }
-
-      const newWickets = currentInn.wickets + (isWicket ? 1 : 0);
-      const maxWickets =
-        battingPlayers.length > 0
-          ? match.last_man_batting
-            ? battingPlayers.length
-            : battingPlayers.length - 1
-          : 10;
-      if (newLegal >= match.overs * 6 || newWickets >= maxWickets || newWickets >= 10) {
-        toast.success("Innings closed");
-      }
-
-      reload();
-      setUnlocked(false);
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message);
+      setBowler("");
+      toast.success("End of over");
     }
+
+    const newWickets = currentInn.wickets + (isWicket ? 1 : 0);
+    const maxWickets =
+      battingPlayers.length > 0
+        ? match.last_man_batting
+          ? battingPlayers.length
+          : battingPlayers.length - 1
+        : 10;
+    if (newLegal >= match.overs * 6 || newWickets >= maxWickets || newWickets >= 10) {
+      toast.success("Innings closed");
+    }
+
+    // Save event locally
+    setLocalEvents((prev) => [...prev, newEvent]);
+    setUnlocked(false);
   };
 
   const undo = async () => {
     if (!currentInn || innBalls.length === 0) return;
     const last = innBalls[innBalls.length - 1];
+
+    // Check if the last ball was recorded more than 10 seconds ago
+    const ballTime = last.created_at ? new Date(last.created_at).getTime() : Date.now();
+    const ageInSeconds = (Date.now() - ballTime) / 1000;
+    if (ageInSeconds > 10) {
+      toast.error("Cannot undo: last ball was recorded more than 10 seconds ago.");
+      return;
+    }
+
+    // Optimistic undo update
+    setUndoneBallIds((prev) => [...prev, last.id]);
+    setLocalEvents((prev) => prev.filter((le) => le.id !== last.id));
+    triggerHaptic();
+
     try {
       await ballService.undoBall(last.id);
+      toast.success("Last ball undone");
       reload();
     } catch (err: any) {
+      // Revert optimistic undo state on failure
+      setUndoneBallIds((prev) => prev.filter((id) => id !== last.id));
       toast.error(err.response?.data?.message || err.message);
     }
   };
@@ -874,7 +1089,7 @@ function LiveScoring() {
     : "0/0";
   const leftOvers = firstInnings ? oversText(firstInnings.legal_balls) : "0.0";
 
-  const secondInnings = innings.find((i) => i.innings_no === 2);
+  const secondInnings = useMemo(() => optimisticInnings.find((i) => i.innings_no === 2), [optimisticInnings]);
   const rightScore = secondInnings
     ? `${secondInnings.runs}/${secondInnings.wickets}`
     : "0/0";
@@ -897,6 +1112,32 @@ function LiveScoring() {
         <span className="font-bold text-base md:text-lg tracking-wide">
           CricketHub Scoring
         </span>
+        {/* Sync Status Badge */}
+        {localEvents.some((e) => !e.synced) ? (
+          syncError ? (
+            <div className="flex items-center gap-1 bg-red-950/40 border border-red-500/30 px-2 py-0.5 rounded-full" title={syncError}>
+              <CloudOff className="h-3 w-3 text-red-400 animate-pulse" />
+              <span className="text-[9px] text-red-400 font-bold uppercase tracking-wider">Offline</span>
+            </div>
+          ) : syncing ? (
+            <div className="flex items-center gap-1 bg-sky-950/40 border border-sky-500/30 px-2 py-0.5 rounded-full">
+              <Cloud className="h-3 w-3 text-sky-400 animate-bounce" />
+              <span className="text-[9px] text-sky-400 font-bold uppercase tracking-wider">Syncing</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 bg-amber-950/40 border border-amber-500/30 px-2 py-0.5 rounded-full">
+              <Cloud className="h-3 w-3 text-amber-400 animate-pulse" />
+              <span className="text-[9px] text-amber-400 font-bold uppercase tracking-wider">Queued</span>
+            </div>
+          )
+        ) : (
+          localEvents.length > 0 && (
+            <div className="flex items-center gap-1 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+              <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+              <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider">Synced</span>
+            </div>
+          )
+        )}
       </div>
       <div className="flex items-center gap-2 md:gap-4">
         {canScore && currentInn && (
@@ -1203,65 +1444,123 @@ function LiveScoring() {
               })}
             </div>
 
-            {/* Scoring Panel Buttons (Grid 3x3 with Shadcn theme classes) */}
+            {/* Scoring Panel Buttons (Interactive modifier layout - no modals, fast taps) */}
             {canScore && (
               <div className="space-y-3">
+                {/* Modifier Helper Banner */}
+                {activeExtraKind && (
+                  <div className="bg-primary/10 border border-primary/20 text-primary rounded-xl py-2 px-3 flex items-center justify-between text-xs animate-pulse">
+                    <span className="font-bold">
+                      Select runs for {activeExtraKind === "no_ball" ? "No Ball" : activeExtraKind === "wide" ? "Wide" : activeExtraKind === "bye" ? "Bye" : "Leg Bye"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveExtraKind(null)}
+                      className="text-[10px] font-black uppercase tracking-wider hover:underline"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-3 gap-2.5">
                   {/* Row 1: 0, 1, 2 */}
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => addBall("run", 0)}
+                    onClick={() => {
+                      if (activeExtraKind) {
+                        addBall(activeExtraKind, 0);
+                        setActiveExtraKind(null);
+                      } else {
+                        addBall("run", 0);
+                      }
+                    }}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer"
+                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer flex flex-col justify-center"
                   >
-                    0
+                    <span>{activeExtraKind ? "+0" : "0"}</span>
                   </Button>
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => addBall("run", 1)}
+                    onClick={() => {
+                      if (activeExtraKind) {
+                        addBall(activeExtraKind, 1);
+                        setActiveExtraKind(null);
+                      } else {
+                        addBall("run", 1);
+                      }
+                    }}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer"
+                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer flex flex-col justify-center"
                   >
-                    1
+                    <span>{activeExtraKind ? "+1" : "1"}</span>
                   </Button>
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => addBall("run", 2)}
+                    onClick={() => {
+                      if (activeExtraKind) {
+                        addBall(activeExtraKind, 2);
+                        setActiveExtraKind(null);
+                      } else {
+                        addBall("run", 2);
+                      }
+                    }}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer"
+                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer flex flex-col justify-center"
                   >
-                    2
+                    <span>{activeExtraKind ? "+2" : "2"}</span>
                   </Button>
 
                   {/* Row 2: 3, 4, 6 */}
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => addBall("run", 3)}
+                    onClick={() => {
+                      if (activeExtraKind) {
+                        addBall(activeExtraKind, 3);
+                        setActiveExtraKind(null);
+                      } else {
+                        addBall("run", 3);
+                      }
+                    }}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer"
+                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer flex flex-col justify-center"
                   >
-                    3
+                    <span>{activeExtraKind ? "+3" : "3"}</span>
                   </Button>
                   <Button
                     type="button"
-                    onClick={() => addBall("run", 4)}
+                    onClick={() => {
+                      if (activeExtraKind) {
+                        addBall(activeExtraKind, 4);
+                        setActiveExtraKind(null);
+                      } else {
+                        addBall("run", 4);
+                      }
+                    }}
                     disabled={isInningsOver}
                     className="h-14 text-base font-black rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md shadow-blue-900/10 border-none active:scale-95 cursor-pointer flex items-center justify-center"
                   >
-                    4
+                    <span>{activeExtraKind ? "+4" : "4"}</span>
                   </Button>
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => addBall("run", 6)}
+                    onClick={() => {
+                      if (activeExtraKind) {
+                        addBall(activeExtraKind, 6);
+                        setActiveExtraKind(null);
+                      } else {
+                        addBall("run", 6);
+                      }
+                    }}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer"
+                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer flex flex-col justify-center"
                   >
-                    6
+                    <span>{activeExtraKind ? "+6" : "6"}</span>
                   </Button>
 
                   {/* Row 3: W, WD, NB */}
@@ -1277,53 +1576,67 @@ function LiveScoring() {
                       Wicket
                     </span>
                   </Button>
+
                   <Button
                     type="button"
-                    variant="outline"
-                    onClick={() => addBall("wide")}
-                    disabled={isInningsOver}
-                    className="h-14 rounded-xl border border-border/40 bg-card hover:bg-muted/40 text-foreground flex flex-col items-center justify-center active:scale-95 cursor-pointer"
-                  >
-                    <span className="text-base font-black">WD</span>
-                    <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">
-                      Wide
-                    </span>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
+                    variant={activeExtraKind === "wide" ? "default" : "outline"}
                     onClick={() => {
-                      const runsStr = prompt(
-                        "Enter runs scored off the bat on this No Ball (0, 1, 2, 3, 4, 6):",
-                        "0",
-                      );
-                      if (runsStr === null) return;
-                      const r = parseInt(runsStr, 10);
-                      if ([0, 1, 2, 3, 4, 6].includes(r)) {
-                        addBall("no_ball", r);
+                      if (activeExtraKind === "wide") {
+                        // Double tap records standard 1-run wide
+                        addBall("wide", 0);
+                        setActiveExtraKind(null);
                       } else {
-                        toast.error("Invalid runs. Please enter 0, 1, 2, 3, 4, or 6.");
+                        setActiveExtraKind("wide");
                       }
                     }}
                     disabled={isInningsOver}
-                    className="h-14 rounded-xl border border-border/40 bg-card hover:bg-muted/40 text-foreground flex flex-col items-center justify-center active:scale-95 cursor-pointer"
+                    className={`h-14 rounded-xl border flex flex-col items-center justify-center active:scale-95 cursor-pointer transition-all ${
+                      activeExtraKind === "wide"
+                        ? "bg-primary border-primary text-primary-foreground shadow-lg scale-105"
+                        : "border-border/40 bg-card hover:bg-muted/40 text-foreground"
+                    }`}
+                  >
+                    <span className="text-base font-black">WD</span>
+                    <span className={`text-[9px] font-bold uppercase tracking-wider ${activeExtraKind === "wide" ? "text-primary-foreground" : "text-muted-foreground"}`}>
+                      Wide
+                    </span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant={activeExtraKind === "no_ball" ? "default" : "outline"}
+                    onClick={() => {
+                      if (activeExtraKind === "no_ball") {
+                        // Double tap records standard no-ball
+                        addBall("no_ball", 0);
+                        setActiveExtraKind(null);
+                      } else {
+                        setActiveExtraKind("no_ball");
+                      }
+                    }}
+                    disabled={isInningsOver}
+                    className={`h-14 rounded-xl border flex flex-col items-center justify-center active:scale-95 cursor-pointer transition-all ${
+                      activeExtraKind === "no_ball"
+                        ? "bg-primary border-primary text-primary-foreground shadow-lg scale-105"
+                        : "border-border/40 bg-card hover:bg-muted/40 text-foreground"
+                    }`}
                   >
                     <span className="text-base font-black">NB</span>
-                    <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">
+                    <span className={`text-[9px] font-bold uppercase tracking-wider ${activeExtraKind === "no_ball" ? "text-primary-foreground" : "text-muted-foreground"}`}>
                       No Ball
                     </span>
                   </Button>
                 </div>
 
-                {/* Byes / Leg Byes */}
-                <div className="flex gap-2 justify-center mt-3 pt-2.5 border-t border-border/30">
+                {/* Bottom Row: Byes, Leg Byes, Undo, Swap Strike */}
+                <div className="flex gap-2 justify-center mt-3 pt-2.5 border-t border-border/30 flex-wrap">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={undo}
                     disabled={innBalls.length === 0}
-                    className="h-8 text-xs font-semibold px-4 border border-border/40 text-muted-foreground bg-card hover:bg-muted/40 rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1"
+                    className="h-8 text-xs font-semibold px-3 border border-border/40 text-muted-foreground bg-card hover:bg-muted/40 rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1"
                   >
                     <RotateCcw className="h-3 w-3" />
                     Undo
@@ -1335,7 +1648,7 @@ function LiveScoring() {
                       size="sm"
                       onClick={swapStrike}
                       disabled={isInningsOver || !striker || !nonStriker}
-                      className="h-8 text-xs font-semibold px-4 border border-border/40 text-muted-foreground bg-card hover:bg-muted/40 rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
+                      className="h-8 text-xs font-semibold px-3 border border-border/40 text-muted-foreground bg-card hover:bg-muted/40 rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1.5"
                     >
                       <ArrowUpDown className="h-3.5 w-3.5 text-primary" />
                       Swap Strike
@@ -1343,23 +1656,45 @@ function LiveScoring() {
                   )}
                   <Button
                     type="button"
-                    variant="outline"
+                    variant={activeExtraKind === "bye" ? "default" : "outline"}
                     size="sm"
-                    onClick={() => addBall("bye", 1)}
+                    onClick={() => {
+                      if (activeExtraKind === "bye") {
+                        addBall("bye", 1);
+                        setActiveExtraKind(null);
+                      } else {
+                        setActiveExtraKind("bye");
+                      }
+                    }}
                     disabled={isInningsOver}
-                    className="h-8 text-xs font-semibold px-4 border border-border/40 text-muted-foreground bg-card hover:bg-muted/40 rounded-lg shadow-sm transition-all cursor-pointer"
+                    className={`h-8 text-xs font-semibold px-3 border rounded-lg shadow-sm transition-all cursor-pointer ${
+                      activeExtraKind === "bye"
+                        ? "bg-primary border-primary text-primary-foreground scale-105"
+                        : "border-border/40 text-muted-foreground bg-card hover:bg-muted/40"
+                    }`}
                   >
-                    +1 Bye
+                    Byes
                   </Button>
                   <Button
                     type="button"
-                    variant="outline"
+                    variant={activeExtraKind === "leg_bye" ? "default" : "outline"}
                     size="sm"
-                    onClick={() => addBall("leg_bye", 1)}
+                    onClick={() => {
+                      if (activeExtraKind === "leg_bye") {
+                        addBall("leg_bye", 1);
+                        setActiveExtraKind(null);
+                      } else {
+                        setActiveExtraKind("leg_bye");
+                      }
+                    }}
                     disabled={isInningsOver}
-                    className="h-8 text-xs font-semibold px-4 border border-border/40 text-muted-foreground bg-card hover:bg-muted/40 rounded-lg shadow-sm transition-all cursor-pointer"
+                    className={`h-8 text-xs font-semibold px-3 border rounded-lg shadow-sm transition-all cursor-pointer ${
+                      activeExtraKind === "leg_bye"
+                        ? "bg-primary border-primary text-primary-foreground scale-105"
+                        : "border-border/40 text-muted-foreground bg-card hover:bg-muted/40"
+                    }`}
                   >
-                    +1 Leg Bye
+                    Leg Byes
                   </Button>
                 </div>
               </div>
