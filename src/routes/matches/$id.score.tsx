@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { AppShell } from "@/components/AppShell";
+import { MilestoneCelebration } from "@/components/MilestoneCelebration";
 import { matchService } from "@/lib/services/matchService";
 import { inningsService } from "@/lib/services/inningsService";
 import { ballService } from "@/lib/services/ballService";
@@ -35,7 +36,12 @@ import {
   Cloud,
   CloudOff,
   CheckCircle2,
+  Sparkles,
+  Flame,
+  Trophy,
+  Award,
 } from "lucide-react";
+import { WinnerCelebrationOverlay } from "@/components/WinnerCelebrationOverlay";
 
 export const Route = createFileRoute("/matches/$id/score")({ component: LiveScoring });
 
@@ -77,6 +83,44 @@ type Ball = any;
 function oversText(b: number) {
   return `${Math.floor(b / 6)}.${b % 6}`;
 }
+
+const playMiniCheer = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const now = ctx.currentTime;
+    const duration = 1.8;
+
+    const bufferSize = ctx.sampleRate * duration;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(600, now);
+    filter.frequency.linearRampToValueAtTime(1200, now + 0.4);
+    filter.frequency.exponentialRampToValueAtTime(400, now + duration);
+
+    const gainNode = ctx.createGain();
+    gainNode.gain.setValueAtTime(0.001, now);
+    gainNode.gain.linearRampToValueAtTime(0.25, now + 0.3);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    noise.connect(filter);
+    filter.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    noise.start(now);
+    noise.stop(now + duration);
+  } catch (e) {
+    console.warn("Cheer sound failed", e);
+  }
+};
 
 function getAbbreviation(name: string) {
   if (!name || name === "—") return "—";
@@ -182,6 +226,26 @@ function LiveScoring() {
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
 
   const [celebrationPlayer, setCelebrationPlayer] = useState<any>(null);
+  const [activeMilestone, setActiveMilestone] = useState<{
+    type: "30_runs" | "50_runs" | "100_runs" | "3_wickets" | "5_wickets" | "50_partnership" | "100_partnership";
+    playerName: string;
+    runs?: number;
+    balls?: number;
+    sr?: string;
+    wickets?: number;
+  } | null>(null);
+
+  const [sixAnimationActive, setSixAnimationActive] = useState(false);
+  const [sixFlashActive, setSixFlashActive] = useState(false);
+  const [winnerCelebration, setWinnerCelebration] = useState<{
+    winnerTeamName: string;
+    margin: string;
+    potmName: string;
+    potmRuns: number;
+    potmBalls: number;
+    potmWickets: number;
+    potmImpact: number;
+  } | null>(null);
 
   useEffect(() => {
     if (innings && innings.length > 0) {
@@ -699,6 +763,77 @@ function LiveScoring() {
     return ((currentInn.runs / currentInn.legal_balls) * 6).toFixed(2);
   }, [currentInn]);
 
+  const projectedScore = useMemo(() => {
+    if (!currentInn || !match) return 0;
+    const crrVal = parseFloat(currentCRR);
+    return Math.round(crrVal * match.overs);
+  }, [currentCRR, currentInn, match]);
+
+  const currentPartnership = useMemo(() => {
+    if (!currentInn || !striker || !nonStriker) {
+      return { playerA: "—", playerB: "—", runs: 0, balls: 0, runRate: "0.00" };
+    }
+    const lastWicketIdx = [...innBalls].reverse().findIndex((b) => b.is_wicket);
+    const partBalls = lastWicketIdx === -1 
+      ? innBalls 
+      : innBalls.slice(innBalls.length - lastWicketIdx);
+    
+    const runs = partBalls.reduce((sum, b) => sum + (b.runs ?? 0) + (b.extra_runs ?? 0), 0);
+    const ballsCount = partBalls.filter((b) => b.extra_type !== "wide").length;
+    const runRate = ballsCount > 0 ? ((runs / ballsCount) * 6).toFixed(2) : "0.00";
+
+    return {
+      playerA: playerName(striker),
+      playerB: playerName(nonStriker),
+      runs,
+      balls: ballsCount,
+      runRate,
+    };
+  }, [innBalls, striker, nonStriker, players, currentInn]);
+
+  const last6Balls = useMemo(() => {
+    return [...innBalls]
+      .slice(-6)
+      .map((b) => {
+        if (b.is_wicket) return "W";
+        if (b.extra_type === "wide") return "Wd";
+        if (b.extra_type === "no_ball") return "Nb";
+        if (b.runs === 4) return "4";
+        if (b.runs === 6) return "6";
+        return String(b.runs);
+      });
+  }, [innBalls]);
+
+  const activeBattersStats = useMemo(() => {
+    const list: { name: string; sr: string }[] = [];
+    if (striker) {
+      const sBalls = innBalls.filter(b => b.batter_id === striker && b.extra_type !== "wide");
+      const sRuns = sBalls.reduce((sum, b) => sum + (b.runs ?? 0), 0);
+      const sr = sBalls.length > 0 ? ((sRuns / sBalls.length) * 100).toFixed(1) : "0.0";
+      list.push({ name: playerName(striker), sr });
+    }
+    if (nonStriker) {
+      const nsBalls = innBalls.filter(b => b.batter_id === nonStriker && b.extra_type !== "wide");
+      const nsRuns = nsBalls.reduce((sum, b) => sum + (b.runs ?? 0), 0);
+      const sr = nsBalls.length > 0 ? ((nsRuns / nsBalls.length) * 100).toFixed(1) : "0.0";
+      list.push({ name: playerName(nonStriker), sr });
+    }
+    return list;
+  }, [innBalls, striker, nonStriker, players]);
+
+  const currentBowlerStat = useMemo(() => {
+    if (!bowler) return null;
+    const bBalls = innBalls.filter(b => b.bowler_id === bowler);
+    const runsConceded = bBalls.reduce((sum, b) => {
+      if (b.extra_type === "bye" || b.extra_type === "leg_bye") return sum;
+      return sum + (b.runs ?? 0) + (b.extra_runs ?? 0);
+    }, 0);
+    const legalBalls = bBalls.filter(b => b.is_legal).length;
+    const econ = legalBalls > 0 ? ((runsConceded / legalBalls) * 6).toFixed(2) : "0.00";
+    const wickets = bBalls.filter(b => b.is_wicket && b.wicket_type !== "run_out").length;
+    return { name: playerName(bowler), econ, wickets };
+  }, [innBalls, bowler, players]);
+
   const secondInningsInfo = useMemo(() => {
     if (!currentInn || currentInn.innings_no !== 2 || !firstInnings || !match) return null;
     const target = firstInnings.runs + 1;
@@ -759,8 +894,136 @@ function LiveScoring() {
     }
   };
 
+  const computePlayerStats = (player: any) => {
+    const pBalls = combinedBalls.filter((b) => b.batter_id === player.id);
+    const runs = pBalls.reduce((sum, b) => {
+      if (b.extra_type === "wide") return sum;
+      return sum + (b.runs ?? 0);
+    }, 0);
+    const ballsFaced = pBalls.filter((b) => b.extra_type !== "wide").length;
+    const sixes = pBalls.filter((b) => b.runs === 6 && b.extra_type !== "wide").length;
+    const fours = pBalls.filter((b) => b.runs === 4 && b.extra_type !== "wide").length;
+
+    const bowlBalls = combinedBalls.filter((b) => b.bowler_id === player.id);
+    const wickets = bowlBalls.filter(
+      (b) => b.is_wicket && b.wicket_type !== "run_out" && b.wicket_type !== "retired_hurt"
+    ).length;
+    const runsConceded = bowlBalls.reduce((sum, b) => {
+      if (b.extra_type === "bye" || b.extra_type === "leg_bye") return sum;
+      return sum + (b.runs ?? 0) + (b.extra_runs ?? 0);
+    }, 0);
+    const legalBallsBowled = bowlBalls.filter((b) => b.is_legal).length;
+
+    const catches = combinedBalls.filter(
+      (b) => b.is_wicket && b.wicket_type === "caught" && b.caught_by_id === player.id
+    ).length;
+
+    // Match Impact Score
+    let impactScore = runs * 1.0 + sixes * 2.0 + fours * 1.0;
+    if (ballsFaced > 0 && runs >= 10) {
+      const strikeRate = (runs / ballsFaced) * 100;
+      impactScore += (strikeRate / 10);
+    }
+    impactScore += wickets * 25.0;
+    if (legalBallsBowled > 0) {
+      const economy = (runsConceded / legalBallsBowled) * 6;
+      if (economy < 8) {
+        impactScore += (8 - economy) * 5;
+      }
+    }
+    impactScore += catches * 10.0;
+
+    return {
+      runs,
+      ballsFaced,
+      sixes,
+      fours,
+      wickets,
+      catches,
+      impactScore: Math.round(impactScore),
+    };
+  };
+
   const endMatch = async () => {
-    if (!confirm("End match?")) return;
+    if (!confirm("Are you sure you want to end this match?")) return;
+
+    // 1. Calculate player stats to determine POTM
+    const playerStatsList = players.map((p) => {
+      const stats = computePlayerStats(p);
+      return { player: p, ...stats };
+    });
+
+    // Sort descending by impactScore
+    const sortedStats = [...playerStatsList].sort((a, b) => b.impactScore - a.impactScore);
+    const potm = sortedStats[0] || {
+      player: { name: "No Player", id: "" },
+      runs: 0,
+      ballsFaced: 0,
+      wickets: 0,
+      impactScore: 0,
+    };
+
+    // 2. Perform achievement checks and save in localStorage
+    players.forEach((p) => {
+      const stats = playerStatsList.find((ps) => ps.player.id === p.id);
+      if (!stats) return;
+
+      const isPOTM = p.id === potm.player.id;
+      const achievementsKey = `criclab_achievements_${p.id}`;
+      let existing: string[] = [];
+      try {
+        const stored = localStorage.getItem(achievementsKey);
+        existing = stored ? JSON.parse(stored) : [];
+      } catch (e) {}
+
+      const newAchievements = new Set(existing);
+      newAchievements.add("first_match");
+      if (stats.runs >= 50) newAchievements.add("first_fifty");
+      if (stats.runs >= 100) newAchievements.add("first_century");
+      if (stats.wickets >= 3) newAchievements.add("first_3_wickets");
+      if (stats.wickets >= 5) newAchievements.add("first_5_wickets");
+      if (isPOTM) newAchievements.add("man_of_the_match");
+      if (isPOTM) newAchievements.add("tournament_mvp");
+
+      localStorage.setItem(achievementsKey, JSON.stringify(Array.from(newAchievements)));
+    });
+
+    // 3. Determine winner margins
+    let winnerTeamName = "No Result";
+    let margin = "Match ended";
+    const inn1 = optimisticInnings.find((inn) => inn.innings_no === 1);
+    const inn2 = optimisticInnings.find((inn) => inn.innings_no === 2);
+
+    if (inn1 && inn2) {
+      if (inn2.runs > inn1.runs) {
+        winnerTeamName = teamName(inn2.batting_team_id);
+        const wicketsLeft = (battingPlayers.length > 0 ? battingPlayers.length : 10) - inn2.wickets;
+        margin = `Won by ${wicketsLeft} wickets`;
+      } else if (inn1.runs > inn2.runs) {
+        winnerTeamName = teamName(inn1.batting_team_id);
+        margin = `Won by ${inn1.runs - inn2.runs} runs`;
+      } else {
+        winnerTeamName = "Match Tied";
+        margin = `Scores level at ${inn1.runs}`;
+      }
+    } else if (inn1) {
+      winnerTeamName = teamName(inn1.batting_team_id);
+      margin = `Innings completed with ${inn1.runs} runs`;
+    }
+
+    // 4. Set winnerCelebration state to open the Winner overlay
+    setWinnerCelebration({
+      winnerTeamName,
+      margin,
+      potmName: potm.player.name,
+      potmRuns: potm.runs,
+      potmBalls: potm.ballsFaced,
+      potmWickets: potm.wickets,
+      potmImpact: potm.impactScore,
+    });
+  };
+
+  const finalizeMatch = async () => {
     try {
       const data = await matchService.endMatch(id);
       toast.success(data.result);
@@ -852,6 +1115,31 @@ function LiveScoring() {
       timestamp: Date.now(),
       synced: false,
     };
+
+    const bowlerBallsBefore = innBalls.filter((b) => b.bowler_id === bowler);
+    const wicketsBefore = bowlerBallsBefore.filter(
+      (b) => b.is_wicket && b.wicket_type !== "run_out"
+    ).length;
+
+    const isBowlerWicket = wType !== "run_out";
+    const newBowlerWickets = wicketsBefore + (isBowlerWicket ? 1 : 0);
+
+    if (isBowlerWicket) {
+      const name = playerName(bowler);
+      if (wicketsBefore < 5 && newBowlerWickets >= 5) {
+        setActiveMilestone({
+          type: "5_wickets",
+          playerName: name,
+          wickets: newBowlerWickets,
+        });
+      } else if (wicketsBefore < 3 && newBowlerWickets >= 3) {
+        setActiveMilestone({
+          type: "3_wickets",
+          playerName: name,
+          wickets: newBowlerWickets,
+        });
+      }
+    }
 
     // Instant tactile/visual feedback
     triggerHaptic();
@@ -971,6 +1259,84 @@ function LiveScoring() {
       timestamp: Date.now(),
       synced: false,
     };
+
+    const strikerBallsBefore = innBalls.filter((b) => b.batter_id === striker);
+    const runsBefore = strikerBallsBefore.reduce((sum, b) => {
+      if (b.extra_type === "wide") return sum;
+      return sum + (b.runs ?? 0);
+    }, 0);
+    const ballsCountBefore = strikerBallsBefore.filter((b) => b.extra_type !== "wide").length;
+
+    const runsAdded = (kind === "run" || kind === "no_ball") ? runs : 0;
+    const isWide = kind === "wide";
+    const newRuns = runsBefore + runsAdded;
+    const newBallsCount = ballsCountBefore + (isWide ? 0 : 1);
+    const newSR = newBallsCount > 0 ? ((newRuns / newBallsCount) * 100).toFixed(1) : "0.0";
+
+    const sName = playerName(striker);
+    if (runsBefore < 100 && newRuns >= 100) {
+      setActiveMilestone({
+        type: "100_runs",
+        playerName: sName,
+        runs: newRuns,
+        balls: newBallsCount,
+        sr: newSR,
+      });
+    } else if (runsBefore < 50 && newRuns >= 50) {
+      setActiveMilestone({
+        type: "50_runs",
+        playerName: sName,
+        runs: newRuns,
+        balls: newBallsCount,
+        sr: newSR,
+      });
+    } else if (runsBefore < 30 && newRuns >= 30) {
+      setActiveMilestone({
+        type: "30_runs",
+        playerName: sName,
+        runs: newRuns,
+        balls: newBallsCount,
+        sr: newSR,
+      });
+    }
+
+    // Calculate partnership milestones
+    if (!isSoloPlay && !isLastManActive && striker && nonStriker) {
+      let runsAddedThisBall = 0;
+      if (kind === "run") runsAddedThisBall = runs;
+      else if (kind === "wide") runsAddedThisBall = (match.wide_run ?? 1) + runs;
+      else if (kind === "no_ball") runsAddedThisBall = (match.noball_run ?? 1) + runs;
+      else if (kind === "bye" || kind === "leg_bye") runsAddedThisBall = runs;
+
+      const runsAfterPart = currentPartnership.runs + runsAddedThisBall;
+      const ballsAfterPart = currentPartnership.balls + (kind === "wide" ? 0 : 1);
+      const pairName = `${playerName(striker)} & ${playerName(nonStriker)}`;
+
+      if (currentPartnership.runs < 100 && runsAfterPart >= 100) {
+        setActiveMilestone({
+          type: "100_partnership",
+          playerName: pairName,
+          runs: runsAfterPart,
+          balls: ballsAfterPart,
+        });
+      } else if (currentPartnership.runs < 50 && runsAfterPart >= 50) {
+        setActiveMilestone({
+          type: "50_partnership",
+          playerName: pairName,
+          runs: runsAfterPart,
+          balls: ballsAfterPart,
+        });
+      }
+    }
+
+    // Six ball animation, crowd cheer & flash trigger
+    if (runs === 6 && (kind === "run" || kind === "no_ball")) {
+      setSixAnimationActive(true);
+      setSixFlashActive(true);
+      playMiniCheer();
+      setTimeout(() => setSixAnimationActive(false), 2000);
+      setTimeout(() => setSixFlashActive(false), 500);
+    }
 
     // Instant tactile/visual feedback
     triggerHaptic();
@@ -1518,6 +1884,43 @@ function LiveScoring() {
 
   return (
     <AppShell>
+      {/* Inline styles for six animations and flash */}
+      <style>{`
+        @keyframes sixFly {
+          0% { transform: scale(0.3) translateY(300px) rotate(0deg); opacity: 0; }
+          20% { opacity: 1; }
+          50% { transform: scale(2.2) translateY(-150px) rotate(180deg); }
+          80% { opacity: 1; }
+          100% { transform: scale(0.1) translateY(-400px) rotate(360deg); opacity: 0; }
+        }
+        .animate-six-fly {
+          animation: sixFly 2.0s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+        }
+        @keyframes fadeOut {
+          0% { opacity: 1; }
+          100% { opacity: 0; }
+        }
+        .animate-fade-out {
+          animation: fadeOut 0.5s ease-out forwards;
+        }
+      `}</style>
+
+      {sixFlashActive && (
+        <div className="fixed inset-0 bg-orange-500/25 pointer-events-none z-[9999] animate-fade-out" />
+      )}
+      {sixAnimationActive && (
+        <div className="fixed inset-0 pointer-events-none z-[9999] flex items-center justify-center">
+          <div className="animate-six-fly relative">
+            <div className="w-16 h-16 rounded-full bg-orange-500 border-4 border-white flex items-center justify-center text-white font-black text-2xl shadow-[0_0_20px_rgba(249,115,22,0.8)]">
+              6
+            </div>
+            <div className="absolute top-full left-1/2 -translate-x-1/2 text-orange-500 font-extrabold text-sm tracking-wider uppercase drop-shadow mt-2 whitespace-nowrap animate-bounce">
+              Huge Hit!
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-background min-h-screen text-foreground font-sans pb-12">
         {CustomHeader}
 
@@ -1586,6 +1989,12 @@ function LiveScoring() {
               </Button>
             </div>
 
+            {secondInningsInfo && (
+              <div className="mt-3 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs font-bold text-center animate-pulse">
+                Target: {secondInningsInfo.target} | Need {secondInningsInfo.needed} runs off {secondInningsInfo.ballsRemaining} balls (RRR: {secondInningsInfo.reqRR})
+              </div>
+            )}
+
             {/* Active team underline indicator using primary theme color */}
             <div className="w-full h-1 bg-muted rounded-full mt-2 flex">
               <div
@@ -1595,6 +2004,110 @@ function LiveScoring() {
                     : "w-[45%] ml-[55%] bg-primary"
                 }`}
               />
+            </div>
+          </Card>
+
+          {/* Live Match Insights Card */}
+          <Card className="p-4 rounded-2xl border border-border/40 shadow-md bg-gradient-to-br from-slate-900/60 to-slate-950/80 backdrop-blur-md">
+            <h3 className="text-xs font-black text-primary uppercase tracking-widest mb-3 flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-primary" /> Live Match Insights
+            </h3>
+            
+            <div className="space-y-3.5 text-xs">
+              {/* Partnership & Last 6 Balls */}
+              <div className="grid grid-cols-2 gap-3 pb-3 border-b border-border/20">
+                <div>
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Partnership</span>
+                  <div className="font-bold text-foreground mt-0.5 truncate max-w-[170px]">
+                    {currentPartnership.playerA} & {currentPartnership.playerB}
+                  </div>
+                  <div className="text-xs font-black text-primary mt-0.5">
+                    {currentPartnership.runs} Runs <span className="text-[10px] text-muted-foreground font-medium">({currentPartnership.balls}b)</span>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    RR: {currentPartnership.runRate}
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Last 6 Balls</span>
+                  <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                    {last6Balls.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    ) : (
+                      last6Balls.map((lbl, idx) => {
+                        let badgeColor = "bg-muted/80 text-foreground";
+                        if (lbl === "W") badgeColor = "bg-destructive text-destructive-foreground font-bold";
+                        else if (lbl === "4") badgeColor = "bg-blue-600 text-white font-bold";
+                        else if (lbl === "6") badgeColor = "bg-orange-500 text-white font-bold shadow-[0_0_8px_rgba(249,115,22,0.4)]";
+                        return (
+                          <span key={idx} className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded ${badgeColor}`}>
+                            {lbl}
+                          </span>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* CRR, RRR & Projected Score */}
+              <div className="grid grid-cols-3 gap-2 pb-3 border-b border-border/20">
+                <div>
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Run Rate</span>
+                  <span className="font-extrabold text-white text-sm mt-0.5 block">
+                    CRR: {currentCRR}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Projected Score</span>
+                  <span className="font-extrabold text-white text-sm mt-0.5 block">
+                    {projectedScore > 0 ? projectedScore : "—"}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground block">
+                    at CRR
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Required Rate</span>
+                  <span className="font-extrabold text-white text-sm mt-0.5 block">
+                    {secondInningsInfo ? `RRR: ${secondInningsInfo.reqRR}` : "N/A"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Batting Stats & Bowler Economy */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Batting Strike Rates</span>
+                  {activeBattersStats.length === 0 ? (
+                    <span className="text-[11px] text-muted-foreground">—</span>
+                  ) : (
+                    activeBattersStats.map((stat, idx) => (
+                      <div key={idx} className="flex justify-between items-center mt-1">
+                        <span className="font-bold text-foreground truncate max-w-[110px]">{stat.name}</span>
+                        <span className="text-muted-foreground font-mono text-[11px]">SR: {stat.sr}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Current Bowler</span>
+                  {currentBowlerStat ? (
+                    <div className="mt-1">
+                      <div className="font-bold text-foreground truncate max-w-[150px]">{currentBowlerStat.name}</div>
+                      <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                        Econ: {currentBowlerStat.econ} | Wkts: {currentBowlerStat.wickets}
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground">—</span>
+                  )}
+                </div>
+              </div>
             </div>
           </Card>
 
@@ -1799,7 +2312,7 @@ function LiveScoring() {
                       }
                     }}
                     disabled={isInningsOver}
-                    className="h-14 text-base font-black rounded-xl border border-border/30 hover:bg-muted/50 text-foreground transition-all shadow-sm active:scale-95 cursor-pointer flex flex-col justify-center"
+                    className="h-14 text-base font-black rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white shadow-[0_0_15px_rgba(249,115,22,0.6)] border-none animate-pulse scale-105 active:scale-95 transition-all cursor-pointer flex flex-col justify-center"
                   >
                     <span>{activeExtraKind ? "+6" : "6"}</span>
                   </Button>
@@ -2597,6 +3110,24 @@ function LiveScoring() {
             </DialogContent>
           </Dialog>
         </>
+      )}
+      {winnerCelebration && (
+        <WinnerCelebrationOverlay
+          winnerTeamName={winnerCelebration.winnerTeamName}
+          margin={winnerCelebration.margin}
+          potmName={winnerCelebration.potmName}
+          potmRuns={winnerCelebration.potmRuns}
+          potmBalls={winnerCelebration.potmBalls}
+          potmWickets={winnerCelebration.potmWickets}
+          potmImpact={winnerCelebration.potmImpact}
+          onComplete={finalizeMatch}
+        />
+      )}
+      {activeMilestone && (
+        <MilestoneCelebration
+          milestone={activeMilestone}
+          onClose={() => setActiveMilestone(null)}
+        />
       )}
     </AppShell>
   );
