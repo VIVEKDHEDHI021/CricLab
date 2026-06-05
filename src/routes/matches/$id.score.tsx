@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { MilestoneCelebration } from "@/components/MilestoneCelebration";
 import { matchService } from "@/lib/services/matchService";
@@ -204,6 +205,7 @@ function LiveScoring() {
   const { id } = Route.useParams();
   const nav = useNavigate();
   const { user, role } = useAuth();
+  const queryClient = useQueryClient();
   const [match, setMatch] = useState<Match | null>(null);
   const [innings, setInnings] = useState<Inn[]>([]);
   const [balls, setBalls] = useState<Ball[]>([]);
@@ -449,6 +451,12 @@ function LiveScoring() {
       setInnings(data.innings ?? []);
       setPlayers(data.players ?? []);
       setBalls(data.balls ?? []);
+      
+      // Update React Query caches instantly
+      queryClient.setQueryData(["match", id], data);
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
+      queryClient.invalidateQueries({ queryKey: ["manOfTheDay"] });
+      queryClient.invalidateQueries({ queryKey: ["playerRankings"] });
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message);
     } finally {
@@ -472,6 +480,12 @@ function LiveScoring() {
       setInnings(data.innings ?? []);
       setPlayers(data.players ?? []);
       setBalls(data.balls ?? []);
+      
+      // Update React Query caches instantly
+      queryClient.setQueryData(["match", id], data);
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
+      queryClient.invalidateQueries({ queryKey: ["manOfTheDay"] });
+      queryClient.invalidateQueries({ queryKey: ["playerRankings"] });
     });
 
     return () => {
@@ -1067,6 +1081,10 @@ function LiveScoring() {
     try {
       const data = await matchService.endMatch(id);
       toast.success(data.result);
+      queryClient.invalidateQueries({ queryKey: ["match", id] });
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
+      queryClient.invalidateQueries({ queryKey: ["manOfTheDay"] });
+      queryClient.invalidateQueries({ queryKey: ["playerRankings"] });
       nav({ to: "/matches/$id", params: { id } });
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message);
