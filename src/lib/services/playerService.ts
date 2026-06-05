@@ -13,6 +13,7 @@ export type Player = {
   name: string;
   team_id: string;
   team_name?: string;
+  team?: { id: string; name: string };
   mobile?: string;
   user_id?: string;
   avatar?: string;
@@ -22,7 +23,7 @@ export type Player = {
   jersey_number?: string;
   catches?: number;
   run_outs?: number;
-  age?: number;
+  age?: number | null;
   city?: string;
   stats?: PlayerStats;
   created_at?: string;
@@ -43,6 +44,11 @@ export type PlayerMatchHistory = {
 
 export type PlayerProfile = {
   player: Player;
+  awards: {
+    man_of_the_match: number;
+    best_batsman: number;
+    best_bowler: number;
+  };
   career: {
     matches: number;
     innings: number;
@@ -123,6 +129,20 @@ export const playerService = {
 
   async searchPlayers(query: string): Promise<Player[]> {
     const { data } = await api.get<Player[]>('/players/search', { params: { query } });
+    return data;
+  },
+
+  async getManOfTheDay(): Promise<{
+    player: Player | null;
+    stats: {
+      mvp: number;
+      runs: number;
+      wickets: number;
+      catches: number;
+    } | null;
+    timeframe: string | null;
+  }> {
+    const { data } = await api.get('/players/man-of-the-day');
     return data;
   },
 };

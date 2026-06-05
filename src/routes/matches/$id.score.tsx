@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { AppShell } from "@/components/AppShell";
 import { matchService } from "@/lib/services/matchService";
 import { inningsService } from "@/lib/services/inningsService";
@@ -89,6 +89,73 @@ function getAbbreviation(name: string) {
     .slice(0, 4);
 }
 
+function CanvasConfetti() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let animationFrameId: number;
+    let width = (canvas.width = window.innerWidth);
+    let height = (canvas.height = window.innerHeight);
+
+    const colors = ["#f43f5e", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
+    
+    // Shoot upward and outward from left/right bottom corners
+    const particles = Array.from({ length: 150 }).map(() => {
+      const isLeft = Math.random() > 0.5;
+      return {
+        x: isLeft ? 0 : width,
+        y: height,
+        size: Math.random() * 6 + 4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        speedX: isLeft ? (Math.random() * 8 + 4) : -(Math.random() * 8 + 4),
+        speedY: -(Math.random() * 15 + 12),
+        gravity: 0.35,
+        rotation: Math.random() * 360,
+        rotationSpeed: Math.random() * 8 - 4
+      };
+    });
+
+    const resize = () => {
+      if (!canvas) return;
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+    };
+    window.addEventListener("resize", resize);
+
+    const draw = () => {
+      ctx.clearRect(0, 0, width, height);
+      particles.forEach((p) => {
+        p.speedY += p.gravity;
+        p.x += p.speedX;
+        p.y += p.speedY;
+        p.rotation += p.rotationSpeed;
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate((p.rotation * Math.PI) / 180);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 1.5);
+        ctx.restore();
+      });
+      animationFrameId = requestAnimationFrame(draw);
+    };
+
+    draw();
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("resize", resize);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-[9999]" />;
+}
+
 function LiveScoring() {
   const { id } = Route.useParams();
   const nav = useNavigate();
@@ -113,6 +180,40 @@ function LiveScoring() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [actionLock, setActionLock] = useState(false);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
+
+  const [celebrationPlayer, setCelebrationPlayer] = useState<any>(null);
+
+  useEffect(() => {
+    if (innings && innings.length > 0) {
+      const closedInnings = innings.filter((inn: any) => inn.is_closed);
+      if (closedInnings.length > 0) {
+        const lastClosed = closedInnings[closedInnings.length - 1];
+        const storageKey = `celebrated_${lastClosed.id}`;
+        if (!sessionStorage.getItem(storageKey)) {
+          const innBalls = (balls ?? []).filter((b: any) => b.innings_id === lastClosed.id);
+          if (innBalls.length > 0) {
+            const innPlayers = players.filter((p: any) => p.team_id === lastClosed.batting_team_id || p.team_id === lastClosed.bowling_team_id);
+            const innStats = innPlayers.map((p: any) => {
+              const batBalls = innBalls.filter((b: any) => b.batter_id === p.id);
+              const runsScored = batBalls.reduce((sum: number, b: any) => sum + b.runs, 0);
+              const wickets = innBalls.filter((b: any) => b.bowler_id === p.id && b.is_wicket && b.wicket_type !== "run_out" && b.wicket_type !== "retired_hurt").length;
+              const catches = innBalls.filter((b: any) => b.is_wicket && b.wicket_type === "caught" && b.caught_by_id === p.id).length;
+              const sixes = batBalls.filter((b: any) => b.runs === 6).length;
+              const fours = batBalls.filter((b: any) => b.runs === 4).length;
+              const mvp = runsScored + (wickets * 20) + (catches * 10) + (sixes * 5) + (fours * 2);
+              return { player: p, mvp, runsScored, wickets, catches };
+            });
+
+            const topPerformer = [...innStats].sort((a, b) => b.mvp - a.mvp)[0];
+            if (topPerformer && topPerformer.mvp > 0) {
+              setCelebrationPlayer(topPerformer);
+              sessionStorage.setItem(storageKey, "true");
+            }
+          }
+        }
+      }
+    }
+  }, [innings, balls, players]);
 
   useEffect(() => {
     if (cooldownRemaining <= 0) return;
@@ -2425,6 +2526,78 @@ function LiveScoring() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {celebrationPlayer && (
+        <>
+          <CanvasConfetti />
+          <Dialog open={!!celebrationPlayer} onOpenChange={() => setCelebrationPlayer(null)}>
+            <DialogContent className="max-w-md bg-gradient-to-b from-amber-500/10 via-card to-card border-amber-500/30 text-foreground text-center p-6 rounded-2xl overflow-hidden shadow-2xl relative">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-pink-500 via-amber-500 to-purple-500" />
+              
+              <DialogHeader className="items-center pb-2">
+                <span className="text-4xl animate-bounce mb-2">🎉</span>
+                <DialogTitle className="text-xl font-black text-amber-500 uppercase tracking-widest flex items-center gap-1.5 leading-none">
+                  Innings MVP!
+                </DialogTitle>
+                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mt-1">Outstanding Performance</p>
+              </DialogHeader>
+
+              <div className="my-5 flex flex-col items-center">
+                <div className="relative mb-3">
+                  <div className="w-20 h-20 rounded-full border-4 border-amber-400 p-0.5 bg-card shadow-lg overflow-hidden flex items-center justify-center">
+                    {celebrationPlayer.player.avatar ? (
+                      <img src={celebrationPlayer.player.avatar} alt={celebrationPlayer.player.name} className="w-full h-full object-cover rounded-full" />
+                    ) : (
+                      <span className="text-amber-500 font-black text-2xl">
+                        {celebrationPlayer.player.name.slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <span className="absolute -bottom-1 -right-1 bg-amber-500 text-base p-1 rounded-full border-2 border-card shadow-md leading-none">
+                    👑
+                  </span>
+                </div>
+
+                <h2 className="text-2xl font-black text-foreground leading-tight font-sans">
+                  {celebrationPlayer.player.name}
+                </h2>
+                <p className="text-xs text-amber-500 font-bold mt-1">
+                  {celebrationPlayer.player.team?.name || "Team Performer"}
+                </p>
+
+                <div className="grid grid-cols-3 gap-3 w-full max-w-xs mt-6 border-t border-b border-border/40 py-3.5 text-center">
+                  <div>
+                    <span className="text-[9px] text-muted-foreground uppercase font-black tracking-wider block">Runs</span>
+                    <span className="text-base font-bold text-foreground mt-0.5 block">{celebrationPlayer.runsScored}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-muted-foreground uppercase font-black tracking-wider block">Wickets</span>
+                    <span className="text-base font-bold text-foreground mt-0.5 block">{celebrationPlayer.wickets}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-muted-foreground uppercase font-black tracking-wider block">Catches</span>
+                    <span className="text-base font-bold text-foreground mt-0.5 block">{celebrationPlayer.catches}</span>
+                  </div>
+                </div>
+
+                <div className="mt-5 bg-amber-500/10 border border-amber-500/25 py-2 px-5 rounded-xl flex items-center gap-3">
+                  <span className="text-[10px] text-amber-500 font-black uppercase tracking-wider">MVP Points Earned</span>
+                  <span className="text-xl font-black text-amber-500">{celebrationPlayer.mvp}</span>
+                </div>
+              </div>
+
+              <DialogFooter className="sm:justify-center mt-2">
+                <Button
+                  onClick={() => setCelebrationPlayer(null)}
+                  className="w-full sm:w-auto px-8 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-md transition-all duration-200"
+                >
+                  Awesome!
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
     </AppShell>
   );
 }

@@ -18,6 +18,12 @@ import {
   ChevronRight, User, LogOut, Loader2, Info
 } from "lucide-react";
 
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
+
 export const Route = createFileRoute("/profile")({
   component: UserProfilePage,
 });
@@ -375,6 +381,31 @@ function UserProfilePage() {
 
           {/* Overview Tab Content */}
           <TabsContent value="overview" className="space-y-4 mt-3">
+            {/* Awards & Achievements Card */}
+            <Card className="p-4 border border-amber-500/20 bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-yellow-500/10 relative overflow-hidden shadow">
+              <div className="absolute top-[-20px] right-[-20px] w-16 h-16 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
+              <h3 className="text-xs font-bold text-amber-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <Trophy className="h-3.5 w-3.5" /> Awards & Honours
+              </h3>
+              <div className="grid grid-cols-3 gap-2.5 text-center">
+                <div className="bg-card/70 border border-amber-500/25 p-2.5 rounded-xl flex flex-col justify-between items-center shadow-sm">
+                  <span className="text-[18px]">🌟</span>
+                  <span className="text-[9px] font-black text-muted-foreground uppercase tracking-wider mt-1 leading-none">Man of Match</span>
+                  <p className="text-lg font-black text-foreground mt-1.5 leading-none">{profile.awards?.man_of_the_match ?? 0}</p>
+                </div>
+                <div className="bg-card/70 border border-primary/20 p-2.5 rounded-xl flex flex-col justify-between items-center shadow-sm">
+                  <span className="text-[18px]">🏏</span>
+                  <span className="text-[9px] font-black text-muted-foreground uppercase tracking-wider mt-1 leading-none">Best Batsman</span>
+                  <p className="text-lg font-black text-primary mt-1.5 leading-none">{profile.awards?.best_batsman ?? 0}</p>
+                </div>
+                <div className="bg-card/70 border border-purple-500/20 p-2.5 rounded-xl flex flex-col justify-between items-center shadow-sm">
+                  <span className="text-[18px]">🥎</span>
+                  <span className="text-[9px] font-black text-muted-foreground uppercase tracking-wider mt-1 leading-none">Best Bowler</span>
+                  <p className="text-lg font-black text-purple-500 mt-1.5 leading-none">{profile.awards?.best_bowler ?? 0}</p>
+                </div>
+              </div>
+            </Card>
+
             <Card className="p-4 border-border bg-card/40">
               <h3 className="text-xs font-semibold text-primary uppercase tracking-wider mb-3 flex items-center">
                 <Sparkles className="h-3 w-3 mr-1.5" /> Player Info

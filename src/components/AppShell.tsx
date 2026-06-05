@@ -61,7 +61,9 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
 
     return () => {
       channel.stopListening(".MatchUpdated");
-      echoClient.leave("matches");
+      if (echoClient) {
+        echoClient.leave("matches");
+      }
     };
   }, [user, queryClient]);
 

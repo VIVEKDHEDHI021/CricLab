@@ -278,12 +278,79 @@ class PlayerController extends Controller
             ];
         }
 
+        // Calculate Awards
+        $momCount = CricketMatch::whereIn('man_of_the_match_id', $playerIds)->count();
+        $bestBatsmanCount = 0;
+        $bestBowlerCount = 0;
+
+        if (count($matchIds) > 0) {
+            $allMatchesBalls = Ball::whereIn('match_id', $matchIds)->get();
+            foreach ($matchIds as $mId) {
+                $mBalls = $allMatchesBalls->where('match_id', $mId);
+                if ($mBalls->isEmpty()) continue;
+
+                $mBatterIds = $mBalls->pluck('batter_id')->filter()->unique()->all();
+                $mBowlerIds = $mBalls->pluck('bowler_id')->filter()->unique()->all();
+                $mPlayerIds = array_unique(array_merge($mBatterIds, $mBowlerIds));
+
+                $mPlayerStats = [];
+                foreach ($mPlayerIds as $pId) {
+                    $batBalls = $mBalls->where('batter_id', $pId);
+                    $runsScored = $batBalls->sum('runs');
+                    $ballsFaced = $batBalls->where('extra_type', '!=', 'wide')->count();
+                    $sr = $ballsFaced > 0 ? ($runsScored / $ballsFaced) * 100 : 0;
+
+                    $bowlBalls = $mBalls->where('bowler_id', $pId);
+                    $wicketsCount = $bowlBalls->where('is_wicket', true)->whereNotIn('wicket_type', ['run_out', 'retired_hurt'])->count();
+                    $runsConceded = $bowlBalls->sum('runs') + $bowlBalls->whereIn('extra_type', ['wide', 'no_ball'])->sum('extra_runs');
+                    $legalBowled = $bowlBalls->where('is_legal', true)->count();
+                    $econ = $legalBowled > 0 ? ($runsConceded / ($legalBowled / 6)) : 0;
+
+                    $mPlayerStats[$pId] = [
+                        'player_id' => $pId,
+                        'runsScored' => $runsScored,
+                        'ballsFaced' => $ballsFaced,
+                        'sr' => $sr,
+                        'wickets' => $wicketsCount,
+                        'runsConceded' => $runsConceded,
+                        'econ' => $econ,
+                    ];
+                }
+
+                // Best Batsman of this match
+                $bestBat = collect($mPlayerStats)->sort(function($a, $b) {
+                    if ($b['runsScored'] !== $a['runsScored']) return $b['runsScored'] - $a['runsScored'];
+                    if ($a['ballsFaced'] !== $b['ballsFaced']) return $a['ballsFaced'] - $b['ballsFaced'];
+                    return $b['sr'] - $a['sr'];
+                })->first();
+
+                // Best Bowler of this match
+                $bestBowl = collect($mPlayerStats)->sort(function($a, $b) {
+                    if ($b['wickets'] !== $a['wickets']) return $b['wickets'] - $a['wickets'];
+                    if ($a['runsConceded'] !== $b['runsConceded']) return $a['runsConceded'] - $b['runsConceded'];
+                    return $a['econ'] - $b['econ'];
+                })->first();
+
+                if ($bestBat && in_array($bestBat['player_id'], $playerIds) && $bestBat['runsScored'] > 0) {
+                    $bestBatsmanCount++;
+                }
+                if ($bestBowl && in_array($bestBowl['player_id'], $playerIds) && $bestBowl['wickets'] > 0) {
+                    $bestBowlerCount++;
+                }
+            }
+        }
+
         // Sum catches and run-outs across all profiles with the same mobile
         $catches = Player::whereIn('id', $playerIds)->sum('catches');
         $runOuts = Player::whereIn('id', $playerIds)->sum('run_outs');
 
         return response()->json([
             'player' => $player,
+            'awards' => [
+                'man_of_the_match' => $momCount,
+                'best_batsman' => $bestBatsmanCount,
+                'best_bowler' => $bestBowlerCount,
+            ],
             'career' => [
                 'matches' => count($matchIds),
                 'innings' => $bat->pluck('innings_id')->unique()->count(),
@@ -457,5 +524,129 @@ class PlayerController extends Controller
         $player = Player::findOrFail($id);
         $player->delete();
         return response()->json(['message' => 'Player deleted successfully.']);
+    }
+
+    public function manOfTheDay()
+    {
+        // 1. Check last 12 hours
+        $matches = CricketMatch::where('status', 'past')
+            ->where('updated_at', '>=', now()->subHours(12))
+            ->get();
+            
+        $type = 'Last 12 Hours';
+
+        // 2. Fallback to last 24 hours
+        if ($matches->isEmpty()) {
+            $matches = CricketMatch::where('status', 'past')
+                ->where('updated_at', '>=', now()->subHours(24))
+                ->get();
+            $type = 'Last 24 Hours';
+        }
+
+        // 3. Fallback to last 7 days
+        if ($matches->isEmpty()) {
+            $matches = CricketMatch::where('status', 'past')
+                ->where('updated_at', '>=', now()->subDays(7))
+                ->get();
+            $type = 'Last 7 Days';
+        }
+
+        // 4. Fallback to the single absolute most recent match
+        if ($matches->isEmpty()) {
+            $latestMatch = CricketMatch::where('status', 'past')
+                ->orderBy('updated_at', 'desc')
+                ->first();
+            if ($latestMatch) {
+                $matches = collect([$latestMatch]);
+                $type = 'Most Recent Match';
+            }
+        }
+
+        if ($matches->isEmpty()) {
+            return response()->json([
+                'player' => null,
+                'stats' => null,
+                'timeframe' => null,
+            ]);
+        }
+
+        // Calculate MVP points of all players in these matches
+        $matchIds = $matches->pluck('id')->all();
+        $balls = Ball::whereIn('match_id', $matchIds)->get();
+        $playerIds = $balls->pluck('batter_id')->concat($balls->pluck('bowler_id'))->filter()->unique()->all();
+        $players = Player::whereIn('id', $playerIds)->with('team')->get();
+
+        $playerStats = [];
+        foreach ($players as $p) {
+            $batBalls = $balls->where('batter_id', $p->id);
+            $runsScored = $batBalls->sum('runs');
+            $ballsFaced = $batBalls->where('extra_type', '!=', 'wide')->count();
+            $sixes = $batBalls->where('runs', 6)->count();
+            $fours = $batBalls->where('runs', 4)->count();
+            $sr = $ballsFaced > 0 ? ($runsScored / $ballsFaced) * 100 : 0;
+
+            $bowlBalls = $balls->where('bowler_id', $p->id);
+            $wickets = $bowlBalls->where('is_wicket', true)->whereNotIn('wicket_type', ['run_out', 'retired_hurt'])->count();
+            $runsConceded = $bowlBalls->sum('runs') + $bowlBalls->whereIn('extra_type', ['wide', 'no_ball'])->sum('extra_runs');
+            $legalBowled = $bowlBalls->where('is_legal', true)->count();
+            $econ = $legalBowled > 0 ? ($runsConceded / ($legalBowled / 6)) : 0;
+
+            // Calculate maidens
+            $oversGrouped = $bowlBalls->groupBy(function($b) {
+                return $b->innings_id . '_' . $b->over_number;
+            });
+            $maidens = 0;
+            foreach ($oversGrouped as $overBalls) {
+                if ($overBalls->where('is_legal', true)->count() >= 6) {
+                    $overRuns = $overBalls->sum('runs') + $overBalls->whereIn('extra_type', ['wide', 'no_ball'])->sum('extra_runs');
+                    if ($overRuns === 0) {
+                        $maidens++;
+                    }
+                }
+            }
+
+            // Sum catches
+            $catches = $balls->where('is_wicket', true)->where('wicket_type', 'caught')->where('caught_by_id', $p->id)->count();
+
+            // MVP formula: runs + wickets*20 + catches*10 + sixes*5 + fours*2 + maidens*25
+            $mvpPoints = $runsScored + ($wickets * 20) + ($catches * 10) + ($sixes * 5) + ($fours * 2) + ($maidens * 25);
+
+            if ($mvpPoints > 0) {
+                $playerStats[] = [
+                    'player' => $p,
+                    'mvp' => $mvpPoints,
+                    'runs' => $runsScored,
+                    'wickets' => $wickets,
+                    'catches' => $catches,
+                    'timeframe' => $type
+                ];
+            }
+        }
+
+        if (empty($playerStats)) {
+            return response()->json([
+                'player' => null,
+                'stats' => null,
+                'timeframe' => null,
+            ]);
+        }
+
+        // Sort by MVP desc
+        usort($playerStats, function ($a, $b) {
+            return $b['mvp'] <=> $a['mvp'];
+        });
+
+        $best = $playerStats[0];
+
+        return response()->json([
+            'player' => $best['player'],
+            'stats' => [
+                'mvp' => $best['mvp'],
+                'runs' => $best['runs'],
+                'wickets' => $best['wickets'],
+                'catches' => $best['catches'],
+            ],
+            'timeframe' => $best['timeframe']
+        ]);
     }
 }

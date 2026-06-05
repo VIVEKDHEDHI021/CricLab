@@ -21,7 +21,7 @@ function MatchesList() {
   const canManage = role === "admin" || role === "scorer";
 
   const onDelete = async (id: string) => {
-    if (!confirm("Delete this match?")) return;
+    if (!confirm("Are you sure you want to delete this match? This will clear the match and its player stats, but the player records/profiles themselves will NOT be deleted.")) return;
     try {
       await matchService.deleteMatch(id);
       toast.success("Deleted");
