@@ -247,6 +247,8 @@ function LiveScoring() {
     potmImpact: number;
   } | null>(null);
 
+  const [matchEndedAuto, setMatchEndedAuto] = useState(false);
+
   useEffect(() => {
     if (innings && innings.length > 0) {
       const closedInnings = innings.filter((inn: any) => inn.is_closed);
@@ -944,8 +946,8 @@ function LiveScoring() {
     };
   };
 
-  const endMatch = async () => {
-    if (!confirm("Are you sure you want to end this match?")) return;
+  const endMatch = async (autoEnd = false) => {
+    if (!autoEnd && !confirm("Are you sure you want to end this match?")) return;
 
     // 1. Calculate player stats to determine POTM
     const playerStatsList = players.map((p) => {
@@ -1022,6 +1024,20 @@ function LiveScoring() {
       potmImpact: potm.impactScore,
     });
   };
+
+  const isSecondInningsCompleted = useMemo(() => {
+    return !!(currentInn && currentInn.innings_no === 2 && isInningsOver);
+  }, [currentInn, isInningsOver]);
+
+  useEffect(() => {
+    if (isSecondInningsCompleted && !matchEndedAuto && !winnerCelebration && match && !match.is_closed) {
+      setMatchEndedAuto(true);
+      const timer = setTimeout(() => {
+        endMatch(true);
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [isSecondInningsCompleted, matchEndedAuto, winnerCelebration, match]);
 
   const finalizeMatch = async () => {
     try {
