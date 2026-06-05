@@ -538,6 +538,21 @@ function MatchDetails() {
                     <div className="text-sm text-muted-foreground mt-1">
                       Overs: <span className="font-semibold">{oversText(currentInn.legal_balls)}</span> / {m.overs}
                     </div>
+                    <div className="mt-2 flex justify-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 px-3 rounded-full border-primary/20 hover:bg-primary/5 text-primary text-xs font-semibold cursor-pointer"
+                        onClick={() => {
+                          refetch();
+                          toast.success("Scoreboard refreshed!");
+                        }}
+                        disabled={isRefetching}
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${isRefetching ? "animate-spin" : ""}`} />
+                        Refresh Score
+                      </Button>
+                    </div>
                     <div className="flex gap-4 mt-3 text-xs border-t border-border/60 pt-3 w-full justify-center">
                       <div>CRR: <span className="font-bold text-foreground">{currentCRR}</span></div>
                       {isSecondInnings && firstInnings && (

@@ -1113,6 +1113,19 @@ function LiveScoring() {
               </div>
             </div>
 
+            <div className="flex justify-end mt-1.5 -mb-0.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 text-[10px] text-muted-foreground hover:text-foreground font-semibold rounded-lg px-2 cursor-pointer"
+                onClick={handleManualRefresh}
+                disabled={isRefreshing}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+                Refresh Scoreboard
+              </Button>
+            </div>
+
             {/* Active team underline indicator using primary theme color */}
             <div className="w-full h-1 bg-muted rounded-full mt-2 flex">
               <div
