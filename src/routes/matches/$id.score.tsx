@@ -2095,26 +2095,26 @@ function LiveScoring() {
               </div>
 
               {/* Batting Stats & Bowler Economy */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
+              <div className="flex flex-wrap justify-between gap-4 mt-3 border-t border-border/40 pt-3 text-left">
+                <div className="flex-1 min-w-[130px]">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Batting Strike Rates</span>
                   {activeBattersStats.length === 0 ? (
                     <span className="text-[11px] text-muted-foreground">—</span>
                   ) : (
                     activeBattersStats.map((stat, idx) => (
-                      <div key={idx} className="flex justify-between items-center mt-1">
-                        <span className="font-bold text-foreground truncate max-w-[110px]">{stat.name}</span>
-                        <span className="text-muted-foreground font-mono text-[11px]">SR: {stat.sr}</span>
+                      <div key={idx} className="flex justify-between items-center mt-1 gap-2">
+                        <span className="font-bold text-foreground truncate max-w-[100px]">{stat.name}</span>
+                        <span className="text-muted-foreground font-mono text-[11px] shrink-0">SR: {stat.sr}</span>
                       </div>
                     ))
                   )}
                 </div>
 
-                <div>
+                <div className="flex-1 min-w-[130px]">
                   <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Current Bowler</span>
                   {currentBowlerStat ? (
                     <div className="mt-1">
-                      <div className="font-bold text-foreground truncate max-w-[150px]">{currentBowlerStat.name}</div>
+                      <div className="font-bold text-foreground truncate max-w-[130px]">{currentBowlerStat.name}</div>
                       <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
                         Econ: {currentBowlerStat.econ} | Wkts: {currentBowlerStat.wickets}
                       </div>

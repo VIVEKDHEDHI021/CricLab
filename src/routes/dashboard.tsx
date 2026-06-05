@@ -306,8 +306,10 @@ function Dashboard() {
         playerName: matchHero.player.name,
         avatar: matchHero.player.avatar,
         teamName: matchHero.teamName,
-        statLine1: `${matchHero.runs} (${matchHero.ballsFaced})`,
-        statLine2: `SR ${matchHero.sr.toFixed(1)}`,
+        label1: "SCORE",
+        value1: `${matchHero.runs} (${matchHero.ballsFaced})`,
+        label2: "STRIKE RATE",
+        value2: `${matchHero.sr.toFixed(1)}`,
         extraStat: matchHero.wickets > 0 ? `${matchHero.wickets} Wicket${matchHero.wickets > 1 ? "s" : ""}` : "",
         matchResult: matchHero.matchOutcome,
         impactScore: matchHero.impactScore,
@@ -326,8 +328,10 @@ function Dashboard() {
         playerName: bestBowler.player.name,
         avatar: bestBowler.player.avatar,
         teamName: bestBowler.teamName,
-        statLine1: `${bestBowler.wickets}/${bestBowler.runsConceded}`,
-        statLine2: `Economy: ${bestBowler.econ.toFixed(1)}`,
+        label1: "SPELL",
+        value1: `${bestBowler.wickets}/${bestBowler.runsConceded}`,
+        label2: "ECONOMY",
+        value2: `${bestBowler.econ.toFixed(1)}`,
         impactScore: bestBowler.impactScore,
         story: `🎯 ${bestBowler.player.name} dismantled the opposition batting lineup with an extraordinary spell of ${bestBowler.wickets} wickets for just ${bestBowler.runsConceded} runs at an economy of ${bestBowler.econ.toFixed(1)}!`,
         playerId: bestBowler.player.id,
@@ -344,8 +348,10 @@ function Dashboard() {
         playerName: powerHitter.player.name,
         avatar: powerHitter.player.avatar,
         teamName: powerHitter.teamName,
-        statLine1: `${powerHitter.runs} (${powerHitter.ballsFaced})`,
-        statLine2: `${powerHitter.sixes} Sixes · SR ${powerHitter.sr.toFixed(1)}`,
+        label1: "SCORE",
+        value1: `${powerHitter.runs} (${powerHitter.ballsFaced})`,
+        label2: "BOUNDARIES",
+        value2: `${powerHitter.sixes} Sixes · SR ${powerHitter.sr.toFixed(1)}`,
         impactScore: powerHitter.impactScore,
         story: `⚡ ${powerHitter.player.name} put on a batting masterclass, raining boundaries and clearing the boundary ropes ${powerHitter.sixes} times at an explosive strike rate of ${powerHitter.sr.toFixed(1)}!`,
         playerId: powerHitter.player.id,
@@ -357,8 +363,8 @@ function Dashboard() {
     const bestFielder = sortedFielder[0];
     if (bestFielder && (bestFielder.catches > 0 || bestFielder.runOuts > 0)) {
       const statsStr = [
-        bestFielder.catches > 0 ? `${bestFielder.catches} Catch${bestFielder.catches > 1 ? "es" : ""}` : "",
-        bestFielder.runOuts > 0 ? `${bestFielder.runOuts} Run Out${bestFielder.runOuts > 1 ? "s" : ""}` : ""
+        bestFielder.catches > 0 ? `${bestFielder.catches} C` : "",
+        bestFielder.runOuts > 0 ? `${bestFielder.runOuts} RO` : ""
       ].filter(Boolean).join(" · ");
 
       cards.push({
@@ -367,8 +373,10 @@ function Dashboard() {
         playerName: bestFielder.player.name,
         avatar: bestFielder.player.avatar,
         teamName: bestFielder.teamName,
-        statLine1: statsStr,
-        statLine2: `Impact Score: ${bestFielder.impactScore}`,
+        label1: "FIELDING",
+        value1: statsStr,
+        label2: "IMPACT",
+        value2: `${bestFielder.impactScore}`,
         impactScore: bestFielder.impactScore,
         story: `🛡 ${bestFielder.player.name} was electric on the field, pulling off crucial intercepts, taking ${bestFielder.catches} grab${bestFielder.catches !== 1 ? "s" : ""} and turning the tide with brilliant fielding!`,
         playerId: bestFielder.player.id,
@@ -388,8 +396,10 @@ function Dashboard() {
         playerName: weeklyHero.player.name,
         avatar: weeklyHero.player.avatar,
         teamName: weeklyHero.player.team?.name || "CricLab Hero",
-        statLine1: `Runs: ${weeklyHero.runs} · Wkts: ${weeklyHero.wickets}`,
-        statLine2: `MVP Awards: ${weeklyHero.mvpAwards} · Followers: ${followers}`,
+        label1: "STATS",
+        value1: `Runs: ${weeklyHero.runs} · Wkts: ${weeklyHero.wickets}`,
+        label2: "MVP AWARDS",
+        value2: `${weeklyHero.mvpAwards} POTM`,
         impactScore: Math.round(Math.min(100, Math.max(65, (weeklyHero.runs * 0.5 + weeklyHero.wickets * 12.5)))),
         story: `👑 With a magnificent run of form, ${weeklyHero.player.name} has dominated the week, amassing ${weeklyHero.runs} runs and taking ${weeklyHero.wickets} wickets to earn the crown of Player of the Week!`,
         playerId: weeklyHero.player.id,
@@ -527,7 +537,7 @@ function Dashboard() {
 
   const executeShare = (platform: "whatsapp" | "instagram" | "telegram") => {
     if (!shareCard) return;
-    const shareText = `🏆 ${shareCard.badge}: ${shareCard.playerName} scored ${shareCard.statLine1} (${shareCard.statLine2}) with an Impact Score of ${shareCard.impactScore}/100! Powered by CricLab.`;
+    const shareText = `🏆 ${shareCard.badge}: ${shareCard.playerName} (${shareCard.label1}: ${shareCard.value1} | ${shareCard.label2}: ${shareCard.value2}) with an Impact Score of ${shareCard.impactScore}/100! Powered by CricLab.`;
     
     let url = "";
     if (platform === "whatsapp") {
@@ -724,16 +734,20 @@ function Dashboard() {
 
                   {/* Highlight Stats */}
                   <div className="bg-slate-950/60 rounded-xl border border-border/20 p-3 mb-4 grid grid-cols-2 gap-3 text-center">
-                    <div>
-                      <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest block leading-none">Performance</span>
-                      <span className="text-sm font-black text-foreground block mt-1.5 leading-none">
-                        {currentHero.statLine1}
+                    <div className="min-w-0">
+                      <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest block leading-none truncate">
+                        {currentHero.label1}
+                      </span>
+                      <span className="text-xs font-black text-foreground block mt-1.5 leading-none truncate">
+                        {currentHero.value1}
                       </span>
                     </div>
-                    <div>
-                      <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest block leading-none">Rating</span>
-                      <span className="text-sm font-black text-orange-500 block mt-1.5 leading-none">
-                        {currentHero.statLine2}
+                    <div className="min-w-0">
+                      <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest block leading-none truncate">
+                        {currentHero.label2}
+                      </span>
+                      <span className="text-xs font-black text-orange-500 block mt-1.5 leading-none truncate">
+                        {currentHero.value2}
                       </span>
                     </div>
                   </div>
