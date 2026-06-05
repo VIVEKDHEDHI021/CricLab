@@ -355,6 +355,7 @@ function LiveScoring() {
   }, [match, activeBattingPlayers]);
 
   const firstInnings = useMemo(() => optimisticInnings.find((i) => i.innings_no === 1), [optimisticInnings]);
+  const secondInnings = useMemo(() => optimisticInnings.find((i) => i.innings_no === 2), [optimisticInnings]);
 
   const isInningsOver = useMemo(() => {
     if (!currentInn || !match) return false;
@@ -1089,7 +1090,7 @@ function LiveScoring() {
     : "0/0";
   const leftOvers = firstInnings ? oversText(firstInnings.legal_balls) : "0.0";
 
-  const secondInnings = useMemo(() => optimisticInnings.find((i) => i.innings_no === 2), [optimisticInnings]);
+
   const rightScore = secondInnings
     ? `${secondInnings.runs}/${secondInnings.wickets}`
     : "0/0";
