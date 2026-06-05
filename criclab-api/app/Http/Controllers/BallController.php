@@ -159,6 +159,13 @@ class BallController extends Controller
             'is_closed' => false,
         ]);
 
+        if ($match->status === 'past') {
+            $match->update([
+                'status' => 'live',
+                'result' => null,
+            ]);
+        }
+
         if ($ball->is_wicket && $ball->wicket_type === 'caught' && $ball->caught_by_id) {
             $catcher = Player::find($ball->caught_by_id);
             if ($catcher) {

@@ -60,6 +60,15 @@ interface BallEvent {
   synced: boolean;
 }
 
+interface UndoState {
+  inningsId: string;
+  ballIndex: number;
+  striker: string;
+  nonStriker: string;
+  bowler: string;
+  isSoloPlay: boolean;
+}
+
 type Match = any;
 type Inn = any;
 type Player = any;
@@ -97,6 +106,7 @@ function LiveScoring() {
 
   // Optimistic UI & Sync states
   const [localEvents, setLocalEvents] = useState<BallEvent[]>([]);
+  const [undoStates, setUndoStates] = useState<UndoState[]>([]);
   const [undoneBallIds, setUndoneBallIds] = useState<string[]>([]);
   const [activeExtraKind, setActiveExtraKind] = useState<"wide" | "no_ball" | "bye" | "leg_bye" | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -153,6 +163,15 @@ function LiveScoring() {
         console.error("Failed to parse saved unsynced events", e);
       }
     }
+
+    const savedUndo = localStorage.getItem(`criclab_undo_states_${id}`);
+    if (savedUndo) {
+      try {
+        setUndoStates(JSON.parse(savedUndo));
+      } catch (e) {
+        console.error("Failed to parse saved undo states", e);
+      }
+    }
   }, [id]);
 
   useEffect(() => {
@@ -162,6 +181,14 @@ function LiveScoring() {
       localStorage.removeItem(`criclab_unsynced_events_${id}`);
     }
   }, [localEvents, id]);
+
+  useEffect(() => {
+    if (undoStates.length > 0) {
+      localStorage.setItem(`criclab_undo_states_${id}`, JSON.stringify(undoStates));
+    } else {
+      localStorage.removeItem(`criclab_undo_states_${id}`);
+    }
+  }, [undoStates, id]);
 
   // 3. Clear synced events once they are present in the server's balls list
   useEffect(() => {
@@ -586,27 +613,8 @@ function LiveScoring() {
   }, [currentInn, firstInnings, match, teamName]);
 
   const disabledBowlers = useMemo(() => {
-    const disabled = new Set<string>();
-    if (!currentInn || !currentInn.legal_balls) return disabled;
-
-    const totalLegal = currentInn.legal_balls;
-    const currentOverNo = Math.floor(totalLegal / 6);
-
-    const legalBallsOfInnings = innBalls.filter((b) => b.is_legal);
-    if (legalBallsOfInnings.length > 0) {
-      const lastLegalBall = legalBallsOfInnings[legalBallsOfInnings.length - 1];
-
-      if (totalLegal % 6 === 0) {
-        disabled.add(lastLegalBall.bowler_id);
-      } else {
-        const prevOverLastBallIndex = currentOverNo * 6 - 1;
-        if (prevOverLastBallIndex >= 0 && prevOverLastBallIndex < legalBallsOfInnings.length) {
-          disabled.add(legalBallsOfInnings[prevOverLastBallIndex].bowler_id);
-        }
-      }
-    }
-    return disabled;
-  }, [currentInn, innBalls]);
+    return new Set<string>();
+  }, []);
 
   const swapStrike = () => {
     if (isSoloPlay || isLastManActive) {
@@ -682,6 +690,17 @@ function LiveScoring() {
     const ballInOver = (legalCount % 6) + 1;
 
     const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Capture state snapshot before modifying state
+    const stateSnapshot: UndoState = {
+      inningsId: currentInn.id,
+      ballIndex,
+      striker,
+      nonStriker,
+      bowler,
+      isSoloPlay,
+    };
+    setUndoStates((prev) => [...prev, stateSnapshot]);
 
     const newEvent: BallEvent = {
       id: localId,
@@ -786,6 +805,17 @@ function LiveScoring() {
 
     const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+    // Capture state snapshot before modifying state
+    const stateSnapshot: UndoState = {
+      inningsId: currentInn.id,
+      ballIndex,
+      striker,
+      nonStriker,
+      bowler,
+      isSoloPlay,
+    };
+    setUndoStates((prev) => [...prev, stateSnapshot]);
+
     const newEvent: BallEvent = {
       id: localId,
       matchId: id,
@@ -851,18 +881,52 @@ function LiveScoring() {
     if (!currentInn || innBalls.length === 0) return;
     const last = innBalls[innBalls.length - 1];
 
-    // Check if the last ball was recorded more than 10 seconds ago
+    // Check if the last ball was recorded more than 120 seconds ago and ask for confirmation
     const ballTime = last.created_at ? new Date(last.created_at).getTime() : Date.now();
     const ageInSeconds = (Date.now() - ballTime) / 1000;
-    if (ageInSeconds > 10) {
-      toast.error("Cannot undo: last ball was recorded more than 10 seconds ago.");
-      return;
+    if (ageInSeconds > 120) {
+      const minutes = Math.round(ageInSeconds / 60);
+      const confirmMsg = `The last ball was recorded ${minutes} minute${minutes !== 1 ? "s" : ""} ago. Are you sure you want to undo it?`;
+      if (!window.confirm(confirmMsg)) {
+        return;
+      }
     }
+
+    // Backup current scoring state in case of failure
+    const backupState = {
+      striker,
+      nonStriker,
+      bowler,
+      isSoloPlay,
+    };
+
+    // Find the state snapshot for the ball we are undoing
+    const lastStateSnapshot = undoStates.find(
+      (us) => us.inningsId === last.innings_id && us.ballIndex === last.ball_index
+    );
 
     // Optimistic undo update
     setUndoneBallIds((prev) => [...prev, last.id]);
     setLocalEvents((prev) => prev.filter((le) => le.id !== last.id));
+    setUndoStates((prev) =>
+      prev.filter(
+        (us) => !(us.inningsId === last.innings_id && us.ballIndex === last.ball_index)
+      )
+    );
     triggerHaptic();
+
+    // Revert to snapshot state
+    if (lastStateSnapshot) {
+      setStriker(lastStateSnapshot.striker);
+      setNonStriker(lastStateSnapshot.nonStriker);
+      setBowler(lastStateSnapshot.bowler);
+      setIsSoloPlay(lastStateSnapshot.isSoloPlay);
+    } else {
+      // Fallback: clear and let auto-initialize handle it
+      setStriker("");
+      setNonStriker("");
+      setBowler("");
+    }
 
     try {
       await ballService.undoBall(last.id);
@@ -871,6 +935,18 @@ function LiveScoring() {
     } catch (err: any) {
       // Revert optimistic undo state on failure
       setUndoneBallIds((prev) => prev.filter((id) => id !== last.id));
+      
+      // Restore backup state
+      setStriker(backupState.striker);
+      setNonStriker(backupState.nonStriker);
+      setBowler(backupState.bowler);
+      setIsSoloPlay(backupState.isSoloPlay);
+
+      // Restore snapshot entry
+      if (lastStateSnapshot) {
+        setUndoStates((prev) => [...prev, lastStateSnapshot]);
+      }
+
       toast.error(err.response?.data?.message || err.message);
     }
   };
