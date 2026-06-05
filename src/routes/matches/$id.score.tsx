@@ -1795,7 +1795,7 @@ function LiveScoring() {
                 <p className="text-sm text-muted-foreground">Both innings have completed.</p>
                 {canScore ? (
                   <Button
-                    onClick={endMatch}
+                    onClick={() => endMatch()}
                     className="w-full bg-primary text-primary-foreground font-bold hover:bg-primary/95 rounded-xl py-2.5"
                   >
                     Finish Match
@@ -1808,6 +1808,18 @@ function LiveScoring() {
               </Card>
             </div>
           </div>
+          {winnerCelebration && (
+            <WinnerCelebrationOverlay
+              winnerTeamName={winnerCelebration.winnerTeamName}
+              margin={winnerCelebration.margin}
+              potmName={winnerCelebration.potmName}
+              potmRuns={winnerCelebration.potmRuns}
+              potmBalls={winnerCelebration.potmBalls}
+              potmWickets={winnerCelebration.potmWickets}
+              potmImpact={winnerCelebration.potmImpact}
+              onComplete={finalizeMatch}
+            />
+          )}
         </AppShell>
       );
     }
