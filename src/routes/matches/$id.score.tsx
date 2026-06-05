@@ -111,6 +111,7 @@ function LiveScoring() {
   const [activeExtraKind, setActiveExtraKind] = useState<"wide" | "no_ball" | "bye" | "leg_bye" | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [actionLock, setActionLock] = useState(false);
   
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -673,6 +674,10 @@ function LiveScoring() {
   };
 
   const executeWicketBall = async (wType: string, dismissedId: string, caughtByPlayerId?: string) => {
+    if (actionLock) return;
+    setActionLock(true);
+    setTimeout(() => setActionLock(false), 350);
+
     setIsWicketDialogOpen(false);
     if (!currentInn) return toast.error("Start an innings first");
 
@@ -765,10 +770,14 @@ function LiveScoring() {
     kind: "run" | "wide" | "no_ball" | "bye" | "leg_bye" | "wicket",
     runs = 0,
   ) => {
+    if (actionLock) return;
     if (kind === "wicket") {
       handleWicketClick();
       return;
     }
+    setActionLock(true);
+    setTimeout(() => setActionLock(false), 350);
+
     if (!currentInn) return toast.error("Start an innings first");
 
     if (!striker || !bowler) return toast.error("Select striker and bowler");
@@ -879,6 +888,10 @@ function LiveScoring() {
 
   const undo = async () => {
     if (!currentInn || innBalls.length === 0) return;
+    if (actionLock) return;
+    setActionLock(true);
+    setTimeout(() => setActionLock(false), 400);
+
     const last = innBalls[innBalls.length - 1];
 
     // Check if the last ball was recorded more than 120 seconds ago and ask for confirmation
@@ -1523,7 +1536,7 @@ function LiveScoring() {
 
             {/* Scoring Panel Buttons (Interactive modifier layout - no modals, fast taps) */}
             {canScore && (
-              <div className="space-y-3">
+              <div className={`space-y-3 transition-all duration-200 ${actionLock ? "pointer-events-none opacity-50" : ""}`}>
                 {/* Modifier Helper Banner */}
                 {activeExtraKind && (
                   <div className="bg-primary/10 border border-primary/20 text-primary rounded-xl py-2 px-3 flex items-center justify-between text-xs animate-pulse">
