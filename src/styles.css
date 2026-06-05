@@ -128,5 +128,16 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    overflow-x: hidden;
+  }
+
+  input, textarea {
+    user-select: text;
+    -webkit-user-select: text;
   }
 }
