@@ -214,6 +214,7 @@ function LiveScoring() {
         setLocalEvents((prev) =>
           prev.map((e) => (e.id === pending.id ? { ...e, synced: true } : e))
         );
+        reload();
       } catch (err: any) {
         if (!active) return;
         console.error("Failed to sync event", pending, err);
@@ -274,12 +275,11 @@ function LiveScoring() {
     };
   }, [id]);
 
-  // 5. Combine server balls with unsynced local events (optimistic view)
+  // 5. Combine server balls with local events (optimistic view)
   const combinedBalls = useMemo(() => {
     const list = balls.filter((b) => !undoneBallIds.includes(b.id));
-    const unsynced = localEvents.filter((e) => !e.synced);
     
-    unsynced.forEach((event) => {
+    localEvents.forEach((event) => {
       if (!list.some((b) => b.ball_index === event.ballIndex && b.innings_id === event.inningsId)) {
         list.push({
           id: event.id,
