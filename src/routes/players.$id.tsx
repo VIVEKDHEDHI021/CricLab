@@ -320,29 +320,31 @@ function PlayerProfilePage() {
               <h3 className="text-xs font-bold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
                 <Trophy className="h-3.5 w-3.5 text-primary" /> Permanent Career Achievements
               </h3>
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {ACHIEVEMENT_DEFINITIONS.map((ach) => {
                   const isUnlocked = playerAchievements.includes(ach.id);
                   return (
                     <div
                       key={ach.id}
-                      className={`p-3 rounded-xl border flex items-center gap-3 transition-all duration-300 ${
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all duration-300 ${
                         isUnlocked
                           ? "bg-amber-500/10 border-amber-500/40 text-foreground shadow-[0_0_12px_rgba(245,158,11,0.15)]"
                           : "bg-muted/10 border-border/30 text-muted-foreground/60 opacity-60"
                       }`}
                     >
-                      <span className={`text-2xl ${isUnlocked ? "" : "grayscale"}`}>{ach.icon}</span>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-xs font-bold truncate">{ach.title}</h4>
-                        <p className="text-[10px] text-muted-foreground truncate">{ach.desc}</p>
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className={`text-2xl shrink-0 ${isUnlocked ? "" : "grayscale"}`}>{ach.icon}</span>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-xs font-bold truncate">{ach.title}</h4>
+                          <p className="text-[10px] text-muted-foreground truncate">{ach.desc}</p>
+                        </div>
                       </div>
                       {isUnlocked ? (
-                        <span className="text-[10px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded font-black uppercase tracking-wider scale-90">
+                        <span className="text-[10px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded font-black uppercase tracking-wider scale-90 shrink-0">
                           Unlocked
                         </span>
                       ) : (
-                        <span className="text-xs">🔒</span>
+                        <span className="text-xs shrink-0">🔒</span>
                       )}
                     </div>
                   );

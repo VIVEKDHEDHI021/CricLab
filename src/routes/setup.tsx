@@ -45,6 +45,11 @@ function PlayerSetupPage() {
           if (found.batting_style) setBattingStyle(found.batting_style);
           if (found.bowling_style) setBowlingStyle(found.bowling_style);
           if (found.jersey_number) setJerseyNumber(found.jersey_number);
+          
+          if (found.role && found.batting_style) {
+            navigate({ to: "/dashboard" });
+            return;
+          }
         } else {
           // If no player profile exists, create one auto-linked to this user
           const newPlayer = await playerService.createPlayer({

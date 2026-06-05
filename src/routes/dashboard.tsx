@@ -658,7 +658,7 @@ function Dashboard() {
                 <p className="text-xs text-muted-foreground/80 max-w-xs mx-auto leading-relaxed">
                   Play and complete at least 3 matches to unlock your players' stats in the premium Heroes Showcase!
                 </p>
-                <Link to="/setup" className="inline-block mt-4">
+                <Link to="/matches/new" className="inline-block mt-4">
                   <Button size="sm" className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-[11px] uppercase tracking-wider px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/20 active:scale-97 transition-all cursor-pointer">
                     Create Match
                   </Button>
