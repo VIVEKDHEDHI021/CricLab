@@ -99,6 +99,7 @@ function PlayerSetupPage() {
     { value: "Bowler", label: "Bowler", desc: "Specialist wicket taker", icon: "🥎" },
     { value: "All-rounder", label: "All-rounder", desc: "Master of bat & ball", icon: "⚡" },
     { value: "Wicket keeper", label: "Wicket keeper", desc: "Gloveman behind stumps", icon: "🧤" },
+    { value: "Captain", label: "Captain", desc: "Team leader & strategist", icon: "👑" },
   ];
 
   const battingOptions = [

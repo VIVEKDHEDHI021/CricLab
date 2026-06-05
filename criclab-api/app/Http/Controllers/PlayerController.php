@@ -279,7 +279,7 @@ class PlayerController extends Controller
         }
 
         // Calculate Awards
-        $momCount = CricketMatch::whereIn('man_of_the_match_id', $playerIds)->count();
+        $momCount = 0;
         $bestBatsmanCount = 0;
         $bestBowlerCount = 0;
 
@@ -299,12 +299,39 @@ class PlayerController extends Controller
                     $runsScored = $batBalls->sum('runs');
                     $ballsFaced = $batBalls->where('extra_type', '!=', 'wide')->count();
                     $sr = $ballsFaced > 0 ? ($runsScored / $ballsFaced) * 100 : 0;
+                    $sixes = $batBalls->where('runs', 6)->count();
+                    $fours = $batBalls->where('runs', 4)->count();
 
                     $bowlBalls = $mBalls->where('bowler_id', $pId);
                     $wicketsCount = $bowlBalls->where('is_wicket', true)->whereNotIn('wicket_type', ['run_out', 'retired_hurt'])->count();
                     $runsConceded = $bowlBalls->sum('runs') + $bowlBalls->whereIn('extra_type', ['wide', 'no_ball'])->sum('extra_runs');
                     $legalBowled = $bowlBalls->where('is_legal', true)->count();
                     $econ = $legalBowled > 0 ? ($runsConceded / ($legalBowled / 6)) : 0;
+
+                    // Calculate maidens
+                    $oversGrouped = $bowlBalls->groupBy(function($b) {
+                        return $b->innings_id . '_' . $b->over_number;
+                    });
+                    $maidens = 0;
+                    foreach ($oversGrouped as $overBalls) {
+                        if ($overBalls->where('is_legal', true)->count() >= 6) {
+                            $overRuns = $overBalls->sum('runs') + $overBalls->whereIn('extra_type', ['wide', 'no_ball'])->sum('extra_runs');
+                            if ($overRuns === 0) {
+                                $maidens++;
+                            }
+                        }
+                    }
+
+                    // Sum catches
+                    $catches = $mBalls->where('is_wicket', true)->where('wicket_type', 'caught')->where('caught_by_id', $pId)->count();
+
+                    // MVP formula
+                    $mvpPoints = ($runsScored * 1) 
+                        + ($wicketsCount * 20) 
+                        + ($catches * 10) 
+                        + ($sixes * 5) 
+                        + ($fours * 2) 
+                        + ($maidens * 25);
 
                     $mPlayerStats[$pId] = [
                         'player_id' => $pId,
@@ -314,6 +341,7 @@ class PlayerController extends Controller
                         'wickets' => $wicketsCount,
                         'runsConceded' => $runsConceded,
                         'econ' => $econ,
+                        'mvp' => $mvpPoints,
                     ];
                 }
 
@@ -330,6 +358,22 @@ class PlayerController extends Controller
                     if ($a['runsConceded'] !== $b['runsConceded']) return $a['runsConceded'] - $b['runsConceded'];
                     return $a['econ'] - $b['econ'];
                 })->first();
+
+                // Calculated Man of the Match
+                $calculatedMoM = collect($mPlayerStats)->sort(function($a, $b) {
+                    if ($b['mvp'] !== $a['mvp']) return $b['mvp'] - $a['mvp'];
+                    if ($b['runsScored'] !== $a['runsScored']) return $b['runsScored'] - $a['runsScored'];
+                    return $b['wickets'] - $a['wickets'];
+                })->first();
+
+                $matchModel = $matches->firstWhere('id', $mId);
+                $momId = ($matchModel && $matchModel->man_of_the_match_id) 
+                    ? $matchModel->man_of_the_match_id 
+                    : ($calculatedMoM ? $calculatedMoM['player_id'] : null);
+
+                if ($momId && in_array($momId, $playerIds)) {
+                    $momCount++;
+                }
 
                 if ($bestBat && in_array($bestBat['player_id'], $playerIds) && $bestBat['runsScored'] > 0) {
                     $bestBatsmanCount++;

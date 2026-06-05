@@ -599,6 +599,7 @@ function PlayerProfilePage() {
                       <SelectItem value="Bowler">Bowler</SelectItem>
                       <SelectItem value="All-rounder">All-rounder</SelectItem>
                       <SelectItem value="Wicket keeper">Wicket keeper</SelectItem>
+                      <SelectItem value="Captain">Captain</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
