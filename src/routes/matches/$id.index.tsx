@@ -25,7 +25,7 @@ function MatchDetails() {
   const { user, role } = useAuth();
   const canManage = role === 'admin' || role === 'scorer';
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ["match", id],
     queryFn: () => matchService.getMatch(id),
   });
@@ -294,15 +294,30 @@ function MatchDetails() {
       <Card className="p-4 rounded-2xl mb-4">
         <div className="flex justify-between items-center mb-1">
           <div className="text-xs text-muted-foreground">{m.ground || "—"} · {m.overs} overs · {m.match_type || ""}</div>
-          {isLiveSync && m.status === "live" && (
-            <span className="flex items-center gap-1.5 text-xs text-emerald-500 font-semibold uppercase tracking-wider">
-              <span className="flex h-2 w-2 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          <div className="flex items-center gap-2">
+            {isLiveSync && m.status === "live" && (
+              <span className="flex items-center gap-1.5 text-xs text-emerald-500 font-semibold uppercase tracking-wider">
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                Live Sync
               </span>
-              Live Sync
-            </span>
-          )}
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0 rounded-full"
+              onClick={() => {
+                refetch();
+                toast.success("Scoreboard refreshed!");
+              }}
+              disabled={isRefetching}
+              title="Refresh Scoreboard"
+            >
+              <RefreshCw className={`h-4 w-4 ${isRefetching ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </div>
         <div className="text-lg font-semibold mt-1">{teamName(m.team_a_id)} vs {teamName(m.team_b_id)}</div>
         <div className="text-sm text-primary mt-1">{m.result || (m.status === "live" ? "Live" : m.status)}</div>

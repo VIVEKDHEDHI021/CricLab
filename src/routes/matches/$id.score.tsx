@@ -31,6 +31,7 @@ import {
   ChevronDown,
   ChevronUp,
   ArrowUpDown,
+  RefreshCw,
 } from "lucide-react";
 
 export const Route = createFileRoute("/matches/$id/score")({ component: LiveScoring });
@@ -68,6 +69,25 @@ function LiveScoring() {
   const [nonStriker, setNonStriker] = useState<string>("");
   const [bowler, setBowler] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      const data = await matchService.getMatch(id);
+      setMatch(data.m);
+      setTeams(data.teams ?? []);
+      setInnings(data.innings ?? []);
+      setPlayers(data.players ?? []);
+      setBalls(data.balls ?? []);
+      toast.success("Scoreboard refreshed!");
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const [isSoloPlay, setIsSoloPlay] = useState(false);
   const [initializedInningsId, setInitializedInningsId] = useState<string | null>(null);
   const [isWicketDialogOpen, setIsWicketDialogOpen] = useState(false);
@@ -889,6 +909,15 @@ function LiveScoring() {
             <span>Undo</span>
           </button>
         )}
+        <button
+          onClick={handleManualRefresh}
+          disabled={isRefreshing}
+          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 disabled:opacity-40 hover:bg-white/10 py-1 px-2 rounded-lg transition-all cursor-pointer"
+          title="Refresh Scoreboard"
+        >
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+          <span>Refresh</span>
+        </button>
         <button
           className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 hover:bg-white/10 py-1 px-2 rounded-lg transition-all cursor-pointer"
           onClick={() => toast.info("Scoring settings & details")}
