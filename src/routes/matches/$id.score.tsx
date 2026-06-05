@@ -248,6 +248,7 @@ function LiveScoring() {
   } | null>(null);
 
   const [matchEndedAuto, setMatchEndedAuto] = useState(false);
+  const [firstInnEndedAuto, setFirstInnEndedAuto] = useState(false);
 
   useEffect(() => {
     if (innings && innings.length > 0) {
@@ -1038,6 +1039,29 @@ function LiveScoring() {
       return () => clearTimeout(timer);
     }
   }, [isSecondInningsCompleted, matchEndedAuto, winnerCelebration, match]);
+
+  const isFirstInningsCompleted = useMemo(() => {
+    return !!(currentInn && currentInn.innings_no === 1 && isInningsOver && !currentInn.is_closed);
+  }, [currentInn, isInningsOver]);
+
+  useEffect(() => {
+    if (isFirstInningsCompleted && !firstInnEndedAuto) {
+      setFirstInnEndedAuto(true);
+      const timer = setTimeout(async () => {
+        try {
+          if (currentInn) {
+            await inningsService.closeInnings(currentInn.id);
+            toast.success("First innings completed!");
+            reload();
+          }
+        } catch (err: any) {
+          toast.error(err.response?.data?.message || err.message);
+          setFirstInnEndedAuto(false);
+        }
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [isFirstInningsCompleted, firstInnEndedAuto, currentInn]);
 
   const finalizeMatch = async () => {
     try {
