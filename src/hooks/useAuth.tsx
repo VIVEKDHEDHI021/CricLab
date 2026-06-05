@@ -34,12 +34,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setRole(me.role);
       setProfileName(me.name);
       setMobile(me.mobile);
-    } catch {
+    } catch (err: any) {
       setUser(null);
       setRole(null);
       setProfileName(null);
       setMobile(null);
-      clearToken();
+      // Only clear token if the server explicitly responded with 401 Unauthorized
+      if (err.response?.status === 401) {
+        clearToken();
+      }
     }
   };
 

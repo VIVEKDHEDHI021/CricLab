@@ -30,6 +30,16 @@ function LoginPage() {
     if (!loading && user && role) nav({ to: "/dashboard" });
   }, [user, role, loading, nav]);
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#070303] flex items-center justify-center">
+        <div className="text-sm font-bold tracking-widest text-white/50 animate-pulse uppercase">
+          Verifying Session…
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <header className="px-4 py-5 border-b border-border">
