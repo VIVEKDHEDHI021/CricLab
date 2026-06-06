@@ -8,7 +8,7 @@ import { echoClient, updateEchoAuth } from "@/lib/echo";
 import { PageBuffer } from "@/components/PageBuffer";
 
 export function AppShell({ children, title }: { children: ReactNode; title?: string }) {
-  const { user, loading, role, isProfileSetupCompleted, mustChangePassword } = useAuth();
+  const { user, loading, role, mustChangePassword } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
   const queryClient = useQueryClient();
@@ -21,13 +21,9 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
         if (loc.pathname !== "/change-password") {
           nav({ to: "/change-password" });
         }
-      } else if (!isProfileSetupCompleted && role === "user") {
-        if (loc.pathname !== "/setup") {
-          nav({ to: "/setup" });
-        }
       }
     }
-  }, [loading, user, isProfileSetupCompleted, mustChangePassword, role, loc.pathname, nav]);
+  }, [loading, user, mustChangePassword, loc.pathname, nav]);
 
   useEffect(() => {
     if (!echoClient || !user) return;

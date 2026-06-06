@@ -308,6 +308,13 @@ function UserProfilePage() {
             <p className="text-xs text-muted-foreground max-w-xs">
               Scorers can add you to matches using your registered mobile number <strong>{mobile}</strong>, which will automatically link your career stats here!
             </p>
+            <div className="pt-2 w-full">
+              <Link to="/setup">
+                <Button className="w-full text-xs font-bold py-2 rounded-xl">
+                  Set Up Player Profile
+                </Button>
+              </Link>
+            </div>
           </Card>
         </div>
       </AppShell>
