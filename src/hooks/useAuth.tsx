@@ -12,6 +12,7 @@ type Ctx = {
   profileName: string | null;
   mobile: string | null;
   isProfileSetupCompleted: boolean;
+  mustChangePassword: boolean;
   refreshRole: () => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -20,6 +21,7 @@ const AuthCtx = createContext<Ctx>({
   user: null, role: null, loading: true,
   profileName: null, mobile: null,
   isProfileSetupCompleted: false,
+  mustChangePassword: false,
   refreshRole: async () => {}, signOut: async () => {},
 });
 
@@ -29,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileName, setProfileName] = useState<string | null>(null);
   const [mobile, setMobile] = useState<string | null>(null);
   const [isProfileSetupCompleted, setIsProfileSetupCompleted] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadUser = async () => {
@@ -38,6 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setRole(me.role);
       setProfileName(me.name);
       setMobile(me.mobile);
+      setMustChangePassword(!!me.must_change_password);
 
       try {
         const players = await playerService.getPlayers();
@@ -56,6 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfileName(null);
       setMobile(null);
       setIsProfileSetupCompleted(false);
+      setMustChangePassword(false);
       // Only clear token if the server explicitly responded with 401 Unauthorized
       if (err.response?.status === 401) {
         clearToken();
@@ -94,10 +99,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setRole(null);
     setProfileName(null);
     setMobile(null);
+    setIsProfileSetupCompleted(false);
+    setMustChangePassword(false);
   };
 
   return (
-    <AuthCtx.Provider value={{ user, role, loading, profileName, mobile, isProfileSetupCompleted, refreshRole, signOut }}>
+    <AuthCtx.Provider value={{ user, role, loading, profileName, mobile, isProfileSetupCompleted, mustChangePassword, refreshRole, signOut }}>
       {children}
     </AuthCtx.Provider>
   );

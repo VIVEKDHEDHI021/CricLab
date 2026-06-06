@@ -7,6 +7,9 @@ use App\Models\Player;
 use App\Services\AdminAccountService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use App\Http\Requests\ForgotPasswordRequest;
+use App\Http\Requests\ChangePasswordRequest;
 
 class AuthController extends Controller
 {
@@ -155,6 +158,7 @@ class AuthController extends Controller
             'role' => $account->role,
             'google_id' => $account->google_id,
             'email' => $account->email,
+            'must_change_password' => $account->must_change_password,
         ]);
     }
 
@@ -189,6 +193,7 @@ class AuthController extends Controller
                 'role' => $account->role,
                 'google_id' => $account->google_id,
                 'email' => $account->email,
+                'must_change_password' => $account->must_change_password,
             ],
         ]);
     }
@@ -310,6 +315,7 @@ class AuthController extends Controller
                     'role' => $user->role,
                     'google_id' => $user->google_id,
                     'email' => $user->email,
+                    'must_change_password' => $user->must_change_password,
                 ]
             ]);
 
@@ -319,5 +325,69 @@ class AuthController extends Controller
                 'message' => 'An error occurred while connecting Google account: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    public function forgotPassword(ForgotPasswordRequest $request)
+    {
+        $mobile = AdminAccountService::normalizeMobile($request->mobile);
+        $account = Account::where('mobile', $mobile)->first();
+
+        if (!$account) {
+            return response()->json([
+                'message' => 'Mobile number not found.'
+            ], 404);
+        }
+
+        return response()->json([
+            'message' => 'Please contact the tournament administrator to reset your password.'
+        ]);
+    }
+
+    public function changePassword(ChangePasswordRequest $request)
+    {
+        $account = $request->user();
+
+        if (!Hash::check($request->current_password, $account->password)) {
+            return response()->json([
+                'message' => 'The current password you entered is incorrect.'
+            ], 422);
+        }
+
+        $account->update([
+            'password' => Hash::make($request->new_password),
+            'must_change_password' => false,
+        ]);
+
+        Log::info("User ID: {$account->id} changed their password successfully.");
+
+        return response()->json([
+            'message' => 'Your password has been changed successfully.'
+        ]);
+    }
+
+    public function listUsers(Request $request)
+    {
+        $users = Account::select('id', 'name', 'mobile', 'email', 'role', 'must_change_password')->get();
+        return response()->json($users);
+    }
+
+    public function resetPassword(Request $request, $id)
+    {
+        $account = Account::findOrFail($id);
+
+        // Generate secure temporary password
+        $tempPassword = bin2hex(random_bytes(4)); // 8-character hex string
+
+        $account->update([
+            'password' => Hash::make($tempPassword),
+            'must_change_password' => true,
+        ]);
+
+        Log::info("Admin reset password for user ID: {$account->id} ({$account->name})");
+
+        return response()->json([
+            'message' => 'Password reset successfully.',
+            'temporary_password' => $tempPassword,
+        ]);
     }
 }

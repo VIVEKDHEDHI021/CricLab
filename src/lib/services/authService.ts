@@ -8,12 +8,22 @@ export type AuthUser = {
   role: 'admin' | 'user' | 'scorer';
   google_id?: string;
   email?: string;
+  must_change_password?: boolean;
 };
 
 export type LoginResponse = {
   user: AuthUser;
   token: string;
 };
+
+export interface AdminUserListItem {
+  id: string;
+  name: string;
+  mobile: string;
+  email?: string;
+  role: string;
+  must_change_password: boolean;
+}
 
 export const authService = {
   async login(mobile: string, password: string, expectedRole: string): Promise<LoginResponse> {
@@ -67,6 +77,30 @@ export const authService = {
 
   async linkGoogle(credential: string): Promise<{ success: boolean; message: string; user: AuthUser }> {
     const { data } = await api.post<{ success: boolean; message: string; user: AuthUser }>('/auth/google/link', { credential });
+    return data;
+  },
+
+  async forgotPassword(mobile: string): Promise<{ message: string }> {
+    const { data } = await api.post<{ message: string }>('/forgot-password', { mobile });
+    return data;
+  },
+
+  async changePassword(currentPassword: string, newPassword: string, newPasswordConfirmation: string): Promise<{ message: string }> {
+    const { data } = await api.post<{ message: string }>('/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+      new_password_confirmation: newPasswordConfirmation,
+    });
+    return data;
+  },
+
+  async adminListUsers(): Promise<AdminUserListItem[]> {
+    const { data } = await api.get<AdminUserListItem[]>('/admin/users');
+    return data;
+  },
+
+  async adminResetPassword(userId: string): Promise<{ message: string; temporary_password: string }> {
+    const { data } = await api.post<{ message: string; temporary_password: string }>(`/admin/users/${userId}/reset-password`);
     return data;
   },
 };

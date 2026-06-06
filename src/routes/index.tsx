@@ -76,6 +76,27 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
   const { refreshRole } = useAuth();
   const [gsiLoaded, setGsiLoaded] = useState(false);
 
+  // Forgot password states
+  const [isForgotOpen, setIsForgotOpen] = useState(false);
+  const [forgotMobile, setForgotMobile] = useState("");
+  const [forgotBusy, setForgotBusy] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState("");
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotMobile.trim()) return toast.error("Mobile number is required");
+    setForgotBusy(true);
+    try {
+      const res = await authService.forgotPassword(forgotMobile);
+      setForgotMessage(res.message);
+    } catch (err: any) {
+      const message = err.response?.data?.message || err.message || "Mobile number not found.";
+      toast.error(message);
+    } finally {
+      setForgotBusy(false);
+    }
+  };
+
   useEffect(() => {
     const handleScriptLoad = () => setGsiLoaded(true);
     
@@ -172,7 +193,20 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor={`pw-${expectedRole}`}>Password</Label>
+          <div className="flex justify-between items-center">
+            <Label htmlFor={`pw-${expectedRole}`}>Password</Label>
+            <button
+              type="button"
+              className="text-xs text-primary hover:underline"
+              onClick={() => {
+                setForgotMessage("");
+                setForgotMobile("");
+                setIsForgotOpen(true);
+              }}
+            >
+              Forgot Password?
+            </button>
+          </div>
           <Input
             id={`pw-${expectedRole}`}
             type="password"
@@ -185,6 +219,39 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
           {busy ? "Please wait…" : "Sign in"}
         </Button>
       </form>
+
+      <Dialog open={isForgotOpen} onOpenChange={setIsForgotOpen}>
+        <DialogContent className="max-w-md bg-card border-border text-foreground">
+          <DialogHeader>
+            <DialogTitle>Forgot Password</DialogTitle>
+          </DialogHeader>
+          {forgotMessage ? (
+            <div className="space-y-4 py-4 text-center">
+              <p className="text-sm font-semibold text-primary">{forgotMessage}</p>
+              <Button onClick={() => { setIsForgotOpen(false); setForgotMessage(""); setForgotMobile(""); }} className="w-full">
+                Close
+              </Button>
+            </div>
+          ) : (
+            <form onSubmit={handleForgotPassword} className="space-y-4 py-2">
+              <div className="space-y-1">
+                <Label htmlFor="forgot-mobile">Registered Mobile Number</Label>
+                <Input
+                  id="forgot-mobile"
+                  inputMode="tel"
+                  value={forgotMobile}
+                  onChange={(e) => setForgotMobile(e.target.value)}
+                  placeholder="e.g. 9876543210"
+                  required
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={forgotBusy}>
+                {forgotBusy ? "Checking..." : "Submit"}
+              </Button>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <div className="relative my-3">
         <div className="absolute inset-0 flex items-center">

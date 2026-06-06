@@ -8,7 +8,7 @@ import { echoClient, updateEchoAuth } from "@/lib/echo";
 import { PageBuffer } from "@/components/PageBuffer";
 
 export function AppShell({ children, title }: { children: ReactNode; title?: string }) {
-  const { user, loading, role, isProfileSetupCompleted } = useAuth();
+  const { user, loading, role, isProfileSetupCompleted, mustChangePassword } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
   const queryClient = useQueryClient();
@@ -17,11 +17,17 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
     if (!loading) {
       if (!user) {
         nav({ to: "/" });
+      } else if (mustChangePassword) {
+        if (loc.pathname !== "/change-password") {
+          nav({ to: "/change-password" });
+        }
       } else if (!isProfileSetupCompleted && role === "user") {
-        nav({ to: "/setup" });
+        if (loc.pathname !== "/setup") {
+          nav({ to: "/setup" });
+        }
       }
     }
-  }, [loading, user, isProfileSetupCompleted, role, nav]);
+  }, [loading, user, isProfileSetupCompleted, mustChangePassword, role, loc.pathname, nav]);
 
   useEffect(() => {
     if (!echoClient || !user) return;
@@ -81,15 +87,19 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
     { to: "/dashboard", label: "Home", icon: Home },
     { to: "/matches", label: "Matches", icon: ListChecks },
     { to: "/players/rankings", label: "Leaderboard", icon: Trophy },
-    { to: "/friends", label: "Friends", icon: Users },
+    role === "admin"
+      ? { to: "/admin/users", label: "Users", icon: Users }
+      : { to: "/friends", label: "Friends", icon: Users },
     { to: "/profile", label: "Profile", icon: UserIcon },
   ];
 
   const isScoringPage = loc.pathname.endsWith("/score");
+  const isChangePasswordPage = loc.pathname === "/change-password";
+  const hideNav = isScoringPage || isChangePasswordPage;
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
-      {!isScoringPage && (
+      {!hideNav && (
         <header className="sticky top-0 z-20 bg-background/90 backdrop-blur border-b border-border px-4 py-3 flex items-center justify-between">
           <div className="text-xl font-bold tracking-tight">
             <span className="text-primary">Cric</span>Lab
@@ -97,11 +107,11 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
           {title && <div className="text-sm text-muted-foreground">{title}</div>}
         </header>
       )}
-      <main className={isScoringPage ? "flex-1 pb-8 w-full" : "flex-1 px-4 pt-4 max-w-xl w-full mx-auto pb-28"}>
+      <main className={hideNav ? "flex-1 pb-8 w-full" : "flex-1 px-4 pt-4 max-w-xl w-full mx-auto pb-28"}>
         {children}
       </main>
 
-      {loc.pathname === "/dashboard" && (
+      {loc.pathname === "/dashboard" && !hideNav && (
         <Link
           to="/matches/new"
           className="fixed bottom-20 right-5 z-30 h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/40 flex items-center justify-center active:scale-95"
@@ -111,7 +121,7 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
         </Link>
       )}
 
-      {!isScoringPage && (
+      {!hideNav && (
         <nav className="fixed bottom-0 inset-x-0 z-20 border-t border-border bg-card/95 backdrop-blur">
           <ul className="grid grid-cols-5 max-w-xl mx-auto">
             {tabs.map((t) => {

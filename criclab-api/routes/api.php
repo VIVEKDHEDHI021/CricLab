@@ -12,10 +12,11 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Broadcast;
 
 // Public routes
-Route::post('/login', [AuthController::class, 'login'])->name('login');
+Route::post('/login', [AuthController::class, 'login'])->name('login')->middleware('throttle:6,1');
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/register/admin', [AuthController::class, 'registerAdmin']);
 Route::post('/auth/google/login', [AuthController::class, 'loginWithGoogle']);
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::get('/make-admin-manual', function () {
     try {
         AdminAccountService::syncDefaultAccounts();
@@ -35,12 +36,13 @@ Route::get('/make-admin-manual', function () {
 });
 
 // Authenticated routes
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', 'force_password_change'])->group(function () {
     Broadcast::routes();
 
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/auth/google/link', [AuthController::class, 'linkGoogleAccount']);
+    Route::post('/change-password', [AuthController::class, 'changePassword']);
 
     // General reads and writes
     Route::get('/teams', [TeamController::class, 'index']);
@@ -77,5 +79,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('admin')->group(function () {
         Route::delete('/teams/{id}', [TeamController::class, 'destroy']);
         Route::delete('/players/{id}', [PlayerController::class, 'destroy']);
+        Route::get('/admin/users', [AuthController::class, 'listUsers']);
+        Route::post('/admin/users/{id}/reset-password', [AuthController::class, 'resetPassword']);
     });
 });
