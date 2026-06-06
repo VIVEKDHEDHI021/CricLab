@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { echoClient, updateEchoAuth } from "@/lib/echo";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import { Plus, User, Search, RefreshCw } from "lucide-react";
+import { Plus, User, Search, RefreshCw, Trash2 } from "lucide-react";
 
 export const Route = createFileRoute("/matches/$id/")({ component: MatchDetails });
 
@@ -286,6 +286,21 @@ function MatchDetails() {
       toast.error(err.response?.data?.message || err.message || "Failed to add player");
     } finally {
       setSubmittingPlayer(false);
+    }
+  };
+  
+  const handleRemovePlayer = async (playerId: string, playerName: string) => {
+    if (!confirm(`Are you sure you want to remove ${playerName} from this squad?`)) return;
+
+    try {
+      await playerService.updatePlayerProfile(playerId, {
+        team_id: null as any,
+      });
+      toast.success(`Removed ${playerName} from the squad`);
+      queryClient.invalidateQueries({ queryKey: ["match", id] });
+      loadAppPlayers();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Failed to remove player");
     }
   };
 
@@ -856,8 +871,21 @@ function MatchDetails() {
             <div className="divide-y divide-border/60">
               {teamAPlayers.map((p: any) => (
                 <div key={p.id} className="py-2 flex justify-between items-center text-sm">
-                  <span>{p.name} {p.jersey_number ? `(${p.jersey_number})` : ""}</span>
-                  <span className="text-xs text-muted-foreground uppercase">{p.role || "Player"}</span>
+                  <div className="flex flex-col">
+                    <span className="font-semibold">{p.name} {p.jersey_number ? `(${p.jersey_number})` : ""}</span>
+                    <span className="text-[10px] text-muted-foreground uppercase">{p.role || "Player"}</span>
+                  </div>
+                  {(canManage || (user && m.created_by === user.id)) && (
+                    <Button 
+                      size="icon" 
+                      variant="ghost" 
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0 rounded-full" 
+                      onClick={() => handleRemovePlayer(p.id, p.name)}
+                      title="Remove player from squad"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               ))}
               {teamAPlayers.length === 0 && (
@@ -879,8 +907,21 @@ function MatchDetails() {
             <div className="divide-y divide-border/60">
               {teamBPlayers.map((p: any) => (
                 <div key={p.id} className="py-2 flex justify-between items-center text-sm">
-                  <span>{p.name} {p.jersey_number ? `(${p.jersey_number})` : ""}</span>
-                  <span className="text-xs text-muted-foreground uppercase">{p.role || "Player"}</span>
+                  <div className="flex flex-col">
+                    <span className="font-semibold">{p.name} {p.jersey_number ? `(${p.jersey_number})` : ""}</span>
+                    <span className="text-[10px] text-muted-foreground uppercase">{p.role || "Player"}</span>
+                  </div>
+                  {(canManage || (user && m.created_by === user.id)) && (
+                    <Button 
+                      size="icon" 
+                      variant="ghost" 
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0 rounded-full" 
+                      onClick={() => handleRemovePlayer(p.id, p.name)}
+                      title="Remove player from squad"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
               ))}
               {teamBPlayers.length === 0 && (
