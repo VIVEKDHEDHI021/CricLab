@@ -96,6 +96,23 @@ class MatchController extends Controller
     public function destroy($id)
     {
         $match = CricketMatch::findOrFail($id);
+
+        // Decrement catches for players who took catches in this match
+        $caughtBalls = \App\Models\Ball::where('match_id', $match->id)
+            ->where('is_wicket', true)
+            ->where('wicket_type', 'caught')
+            ->whereNotNull('caught_by_id')
+            ->get();
+
+        foreach ($caughtBalls as $ball) {
+            $catcher = Player::find($ball->caught_by_id);
+            if ($catcher) {
+                $catcher->update([
+                    'catches' => max(0, $catcher->catches - 1)
+                ]);
+            }
+        }
+
         $match->delete();
         return response()->json(['message' => 'Match deleted successfully.']);
     }

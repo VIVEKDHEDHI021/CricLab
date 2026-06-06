@@ -172,8 +172,14 @@ class PlayerController extends Controller
 
         $bat = Ball::whereIn('batter_id', $playerIds)->whereIn('match_id', $pastMatchIds)->get();
         $bowl = Ball::whereIn('bowler_id', $playerIds)->whereIn('match_id', $pastMatchIds)->get();
+        $field = Ball::whereIn('caught_by_id', $playerIds)->whereIn('match_id', $pastMatchIds)->get();
 
-        $matchIds = $bat->pluck('match_id')->concat($bowl->pluck('match_id'))->unique()->values()->all();
+        $matchIds = $bat->pluck('match_id')
+            ->concat($bowl->pluck('match_id'))
+            ->concat($field->pluck('match_id'))
+            ->unique()
+            ->values()
+            ->all();
         $matches = CricketMatch::with(['teamA', 'teamB', 'innings'])
             ->whereIn('id', $matchIds)
             ->orderBy('match_date', 'desc')
@@ -500,6 +506,12 @@ class PlayerController extends Controller
 
             $bat = $balls->whereIn('batter_id', $playerIds);
             $bowl = $balls->whereIn('bowler_id', $playerIds);
+            $field = $balls->whereIn('caught_by_id', $playerIds);
+
+            // Exclude players who have not played any matches (meaning no batting, no bowling, and no fielding)
+            if ($bat->isEmpty() && $bowl->isEmpty() && $field->isEmpty()) {
+                continue;
+            }
 
             $runs = $bat->sum('runs');
             $sixes = $bat->where('runs', 6)->count();
