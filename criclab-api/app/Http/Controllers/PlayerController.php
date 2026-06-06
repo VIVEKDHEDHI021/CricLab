@@ -141,7 +141,7 @@ class PlayerController extends Controller
     {
         $request->validate([
             'name' => 'required|string|max:255',
-            'team_id' => 'required|uuid|exists:teams,id',
+            'team_id' => 'nullable|uuid|exists:teams,id',
             'mobile' => 'nullable|string',
         ]);
 
@@ -152,7 +152,7 @@ class PlayerController extends Controller
 
         $player = Player::create([
             'name' => $request->name,
-            'team_id' => $request->team_id,
+            'team_id' => $request->team_id ?: null,
             'mobile' => $request->mobile,
             'user_id' => $user ? $user->id : null,
         ]);
@@ -435,7 +435,15 @@ class PlayerController extends Controller
         $player = Player::findOrFail($id);
         $user = $request->user();
 
-        if ($user->role !== 'admin' && $player->user_id !== $user->id) {
+        // Auto-link if mobile matches and user_id is not set
+        if ($player->user_id === null && $player->mobile && $player->mobile === $user->mobile) {
+            $player->user_id = $user->id;
+            $player->save();
+        }
+
+        $isOwner = ($player->user_id === $user->id) || ($player->mobile && $player->mobile === $user->mobile);
+
+        if ($user->role !== 'admin' && !$isOwner) {
             // Allow authenticated scorers to assign/move players to teams, or update basic player info
             if ($request->has('team_id') || $request->has('name') || $request->has('mobile')) {
                 $allowedKeys = ['team_id', 'name', 'mobile'];
