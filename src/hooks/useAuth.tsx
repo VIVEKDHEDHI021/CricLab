@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { authService, type AuthUser } from "@/lib/services/authService";
 import { getToken, clearToken } from "@/lib/api";
+import { playerService } from "@/lib/services/playerService";
 
 export type Role = "admin" | "user" | "scorer" | null;
 
@@ -10,6 +11,7 @@ type Ctx = {
   loading: boolean;
   profileName: string | null;
   mobile: string | null;
+  isProfileSetupCompleted: boolean;
   refreshRole: () => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -17,6 +19,7 @@ type Ctx = {
 const AuthCtx = createContext<Ctx>({
   user: null, role: null, loading: true,
   profileName: null, mobile: null,
+  isProfileSetupCompleted: false,
   refreshRole: async () => {}, signOut: async () => {},
 });
 
@@ -25,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Role>(null);
   const [profileName, setProfileName] = useState<string | null>(null);
   const [mobile, setMobile] = useState<string | null>(null);
+  const [isProfileSetupCompleted, setIsProfileSetupCompleted] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadUser = async () => {
@@ -34,11 +38,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setRole(me.role);
       setProfileName(me.name);
       setMobile(me.mobile);
+
+      try {
+        const players = await playerService.getPlayers();
+        const found = players.find(p => p.mobile === me.mobile || p.user_id === me.id);
+        if (found && found.role && found.batting_style) {
+          setIsProfileSetupCompleted(true);
+        } else {
+          setIsProfileSetupCompleted(false);
+        }
+      } catch {
+        setIsProfileSetupCompleted(false);
+      }
     } catch (err: any) {
       setUser(null);
       setRole(null);
       setProfileName(null);
       setMobile(null);
+      setIsProfileSetupCompleted(false);
       // Only clear token if the server explicitly responded with 401 Unauthorized
       if (err.response?.status === 401) {
         clearToken();
@@ -80,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthCtx.Provider value={{ user, role, loading, profileName, mobile, refreshRole, signOut }}>
+    <AuthCtx.Provider value={{ user, role, loading, profileName, mobile, isProfileSetupCompleted, refreshRole, signOut }}>
       {children}
     </AuthCtx.Provider>
   );

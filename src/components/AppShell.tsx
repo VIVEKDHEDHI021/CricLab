@@ -8,14 +8,20 @@ import { echoClient, updateEchoAuth } from "@/lib/echo";
 import { PageBuffer } from "@/components/PageBuffer";
 
 export function AppShell({ children, title }: { children: ReactNode; title?: string }) {
-  const { user, loading, role } = useAuth();
+  const { user, loading, role, isProfileSetupCompleted } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!loading && !user) nav({ to: "/" });
-  }, [loading, user, nav]);
+    if (!loading) {
+      if (!user) {
+        nav({ to: "/" });
+      } else if (!isProfileSetupCompleted && role === "user") {
+        nav({ to: "/setup" });
+      }
+    }
+  }, [loading, user, isProfileSetupCompleted, role, nav]);
 
   useEffect(() => {
     if (!echoClient || !user) return;

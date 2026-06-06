@@ -230,17 +230,6 @@ function PlayerSetupPage() {
           )}
         </Button>
       </form>
-
-      {/* Footer link to skip onboarding */}
-      <div className="text-center max-w-md mx-auto w-full">
-        <button
-          type="button"
-          onClick={() => navigate({ to: "/dashboard" })}
-          className="text-xs text-muted-foreground/80 hover:text-foreground hover:underline transition-colors"
-        >
-          Skip setup for now
-        </button>
-      </div>
     </div>
   );
 }
