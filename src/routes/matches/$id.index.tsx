@@ -62,6 +62,30 @@ function MatchDetails() {
   const [selectedMoMPlayerId, setSelectedMoMPlayerId] = useState("");
   const [submittingMoM, setSubmittingMoM] = useState(false);
 
+  // Edit Overs states
+  const [isEditOversOpen, setIsEditOversOpen] = useState(false);
+  const [inputOvers, setInputOvers] = useState<number>(6);
+  const [submittingOvers, setSubmittingOvers] = useState(false);
+
+  const handleSaveOvers = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (inputOvers < 1 || inputOvers > 50) {
+      toast.error("Overs must be between 1 and 50");
+      return;
+    }
+    setSubmittingOvers(true);
+    try {
+      await matchService.updateMatch(id, { overs: inputOvers });
+      toast.success("Match overs updated successfully!");
+      setIsEditOversOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["match", id] });
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Failed to update overs");
+    } finally {
+      setSubmittingOvers(false);
+    }
+  };
+
   // Recommendations / player stats calculation
   const playerStats = useMemo(() => {
     if (!players || !balls) return [];
@@ -309,7 +333,21 @@ function MatchDetails() {
       {/* Match Info Card */}
       <Card className="p-4 rounded-2xl mb-4">
         <div className="flex justify-between items-center mb-1">
-          <div className="text-xs text-muted-foreground">{m.ground || "—"} · {m.overs} overs · {m.match_type || ""}</div>
+          <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
+            <span>{m.ground || "—"} · {m.overs} overs · {m.match_type || ""}</span>
+            {canManage && (
+              <button
+                type="button"
+                onClick={() => {
+                  setInputOvers(m.overs);
+                  setIsEditOversOpen(true);
+                }}
+                className="text-[10px] text-primary hover:underline font-bold bg-primary/10 hover:bg-primary/15 px-1.5 py-0.5 rounded transition-all cursor-pointer"
+              >
+                Edit Overs
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {isLiveSync && m.status === "live" && (
               <span className="flex items-center gap-1.5 text-xs text-emerald-500 font-semibold uppercase tracking-wider">
@@ -1283,6 +1321,42 @@ function MatchDetails() {
               {submittingMoM ? "Saving..." : "Save Selection"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Overs Dialog */}
+      <Dialog open={isEditOversOpen} onOpenChange={setIsEditOversOpen}>
+        <DialogContent className="max-w-xs bg-card border border-border text-foreground rounded-2xl shadow-xl p-5">
+          <DialogHeader>
+            <DialogTitle className="text-base font-extrabold">
+              Edit Match Overs
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSaveOvers} className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="match-overs" className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
+                Total Overs
+              </Label>
+              <Input
+                id="match-overs"
+                type="number"
+                min="1"
+                max="50"
+                value={inputOvers}
+                onChange={(e) => setInputOvers(parseInt(e.target.value) || 1)}
+                className="bg-background border-border"
+                required
+              />
+            </div>
+            <DialogFooter className="pt-2 flex gap-2">
+              <Button type="button" variant="outline" className="flex-1 text-xs h-9 font-semibold" onClick={() => setIsEditOversOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submittingOvers} className="flex-1 text-xs h-9 font-bold">
+                {submittingOvers ? "Saving..." : "Save"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

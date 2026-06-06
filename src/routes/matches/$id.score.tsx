@@ -8,6 +8,7 @@ import { inningsService } from "@/lib/services/inningsService";
 import { ballService } from "@/lib/services/ballService";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectTrigger,
@@ -310,6 +311,31 @@ function LiveScoring() {
   };
 
   const [isSoloPlay, setIsSoloPlay] = useState(false);
+  const [inputOvers, setInputOvers] = useState<number>(6);
+  const [submittingOvers, setSubmittingOvers] = useState(false);
+
+  useEffect(() => {
+    if (match) {
+      setInputOvers(match.overs);
+    }
+  }, [match?.id, match?.overs]);
+
+  const handleSaveOvers = async () => {
+    if (inputOvers < 1 || inputOvers > 50) {
+      toast.error("Overs must be between 1 and 50");
+      return;
+    }
+    setSubmittingOvers(true);
+    try {
+      await matchService.updateMatch(id, { overs: inputOvers });
+      toast.success("Match overs updated successfully!");
+      await reload();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Failed to update overs");
+    } finally {
+      setSubmittingOvers(false);
+    }
+  };
   const [initializedInningsId, setInitializedInningsId] = useState<string | null>(null);
   const [isWicketDialogOpen, setIsWicketDialogOpen] = useState(false);
   const [wicketType, setWicketType] = useState<string>("bowled");
@@ -1934,7 +1960,7 @@ function LiveScoring() {
                     <Button
                       variant="outline"
                       className="w-full border-border text-foreground py-2.5 font-bold"
-                      onClick={endMatch}
+                      onClick={() => endMatch()}
                     >
                       End Match
                     </Button>
@@ -2923,7 +2949,7 @@ function LiveScoring() {
             <Button
               variant="outline"
               className="w-full py-2.5 border-border hover:bg-muted text-foreground rounded-xl shadow-sm text-xs font-bold transition-all active:scale-97 cursor-pointer"
-              onClick={endMatch}
+              onClick={() => endMatch()}
             >
               End Match
             </Button>
@@ -3064,7 +3090,7 @@ function LiveScoring() {
                   type="button"
                   variant="outline"
                   className="w-full justify-start gap-2 h-10 border-red-500/30 text-red-500 hover:bg-red-500/10 hover:text-red-500 font-semibold"
-                  onClick={endMatch}
+                  onClick={() => endMatch()}
                 >
                   <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
                   End Match (Declare Result)
@@ -3092,6 +3118,32 @@ function LiveScoring() {
                     }`}
                   />
                 </button>
+              </div>
+            </div>
+
+            <div className="space-y-1 pt-2 border-t border-border/30">
+              <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Match Settings</p>
+              <div className="flex items-center justify-between py-1.5">
+                <span className="text-xs font-semibold text-muted-foreground">Match Overs</span>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={inputOvers}
+                    onChange={(e) => setInputOvers(parseInt(e.target.value) || 1)}
+                    className="w-16 h-8 text-xs text-center bg-background border-border"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleSaveOvers}
+                    disabled={submittingOvers}
+                    className="h-8 text-[10px] font-black uppercase tracking-wider cursor-pointer"
+                  >
+                    {submittingOvers ? "Saving..." : "Save"}
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
