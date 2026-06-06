@@ -15,6 +15,7 @@ type Ctx = {
   mustChangePassword: boolean;
   refreshRole: () => Promise<void>;
   signOut: () => Promise<void>;
+  setIsProfileSetupCompleted: (val: boolean) => void;
 };
 
 const AuthCtx = createContext<Ctx>({
@@ -23,6 +24,7 @@ const AuthCtx = createContext<Ctx>({
   isProfileSetupCompleted: false,
   mustChangePassword: false,
   refreshRole: async () => {}, signOut: async () => {},
+  setIsProfileSetupCompleted: () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -104,7 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthCtx.Provider value={{ user, role, loading, profileName, mobile, isProfileSetupCompleted, mustChangePassword, refreshRole, signOut }}>
+    <AuthCtx.Provider value={{ user, role, loading, profileName, mobile, isProfileSetupCompleted, mustChangePassword, refreshRole, signOut, setIsProfileSetupCompleted }}>
       {children}
     </AuthCtx.Provider>
   );

@@ -14,7 +14,7 @@ export const Route = createFileRoute("/setup")({
 });
 
 function PlayerSetupPage() {
-  const { user, loading } = useAuth();
+  const { user, loading, refreshRole, setIsProfileSetupCompleted } = useAuth();
   const navigate = useNavigate();
 
   const [playerId, setPlayerId] = useState<string | null>(null);
@@ -47,6 +47,8 @@ function PlayerSetupPage() {
           if (found.jersey_number) setJerseyNumber(found.jersey_number);
           
           if (found.role && found.batting_style) {
+            setIsProfileSetupCompleted(true);
+            await refreshRole();
             navigate({ to: "/dashboard" });
             return;
           }
@@ -82,6 +84,8 @@ function PlayerSetupPage() {
         jersey_number: jerseyNumber || undefined,
       });
       toast.success("Profile setup completed successfully!");
+      setIsProfileSetupCompleted(true);
+      await refreshRole();
       navigate({ to: "/dashboard" });
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || "Failed to complete setup");
