@@ -67,6 +67,7 @@ Route::middleware(['auth:sanctum', 'force_password_change'])->group(function () 
         Route::patch('/innings/{id}/close', [InningsController::class, 'closeInnings']);
         Route::post('/innings/{inningsId}/balls', [BallController::class, 'store']);
         Route::delete('/balls/{id}', [BallController::class, 'destroy']);
+        Route::put('/balls/{id}', [BallController::class, 'update']);
         Route::patch('/matches/{id}/end', [MatchController::class, 'end']);
         Route::put('/matches/{id}', [MatchController::class, 'update']);
     });

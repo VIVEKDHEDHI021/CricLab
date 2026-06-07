@@ -43,6 +43,25 @@ export const ballService = {
     return data;
   },
 
+  async updateBall(
+    ballId: string,
+    ballData: {
+      batter_id: string;
+      non_striker_id: string | null;
+      bowler_id: string;
+      runs: number;
+      extra_runs: number;
+      extra_type: string | null;
+      is_wicket: boolean;
+      wicket_type?: string | null;
+      is_legal: boolean;
+      caught_by_id?: string | null;
+    }
+  ): Promise<Ball> {
+    const { data } = await api.put<Ball>(`/balls/${ballId}`, ballData);
+    return data;
+  },
+
   async undoBall(ballId: string): Promise<void> {
     await api.delete(`/balls/${ballId}`);
   },
