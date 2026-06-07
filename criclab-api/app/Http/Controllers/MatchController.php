@@ -47,8 +47,42 @@ class MatchController extends Controller
         $match = CricketMatch::findOrFail($id);
         $teams = Team::whereIn('id', [$match->team_a_id, $match->team_b_id])->get();
         $innings = $match->innings()->orderBy('innings_no')->get();
-        $players = Player::whereIn('team_id', [$match->team_a_id, $match->team_b_id])->get();
         $balls = $match->balls()->orderBy('ball_index')->get();
+
+        // Retrieve player IDs referenced in match balls (in case they were removed/moved from teams)
+        $referencedPlayerIds = $balls->flatMap(function ($b) {
+            return [$b->batter_id, $b->non_striker_id, $b->bowler_id, $b->caught_by_id];
+        })->filter()->unique()->all();
+
+        $players = Player::whereIn('team_id', [$match->team_a_id, $match->team_b_id])
+            ->orWhereIn('id', $referencedPlayerIds)
+            ->get();
+
+        // If a player was fetched via referencedPlayerIds but their current team_id in database is different,
+        // map it to the team they played for in this match so the frontend filters them correctly.
+        $players = $players->map(function ($player) use ($balls, $innings, $match) {
+            if (in_array($player->team_id, [$match->team_a_id, $match->team_b_id])) {
+                return $player;
+            }
+
+            foreach ($balls as $b) {
+                if ($b->batter_id === $player->id || $b->non_striker_id === $player->id) {
+                    $inn = $innings->firstWhere('id', $b->innings_id);
+                    if ($inn) {
+                        $player->team_id = $inn->batting_team_id;
+                        break;
+                    }
+                }
+                if ($b->bowler_id === $player->id) {
+                    $inn = $innings->firstWhere('id', $b->innings_id);
+                    if ($inn) {
+                        $player->team_id = $inn->bowling_team_id;
+                        break;
+                    }
+                }
+            }
+            return $player;
+        });
 
         return response()->json([
             'm' => $match,
@@ -138,7 +172,17 @@ class MatchController extends Controller
             if ($inn1->runs > $inn2->runs) {
                 $result = ($team1->name ?? 'First Team') . ' won by ' . ($inn1->runs - $inn2->runs) . ' runs';
             } elseif ($inn2->runs > $inn1->runs) {
-                $battingPlayersCount = Player::where('team_id', $inn2->batting_team_id)->count();
+                $currentBattingPlayerIds = Player::where('team_id', $inn2->batting_team_id)->pluck('id')->all();
+                $actualBattingPlayerIds = \App\Models\Ball::where('innings_id', $inn2->id)
+                    ->get()
+                    ->flatMap(function ($b) {
+                        return [$b->batter_id, $b->non_striker_id];
+                    })
+                    ->filter()
+                    ->unique()
+                    ->all();
+                $battingPlayersCount = count(array_unique(array_merge($currentBattingPlayerIds, $actualBattingPlayerIds)));
+
                 $isLastMan = $match->last_man_batting;
                 $wicketsRemaining = $isLastMan 
                     ? ($battingPlayersCount - $inn2->wickets) 

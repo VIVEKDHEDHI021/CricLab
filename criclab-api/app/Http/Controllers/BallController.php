@@ -128,7 +128,17 @@ class BallController extends Controller
             }
         }
 
-        $battingPlayersCount = Player::where('team_id', $innings->batting_team_id)->count();
+        $currentBattingPlayerIds = Player::where('team_id', $innings->batting_team_id)->pluck('id')->all();
+        $actualBattingPlayerIds = Ball::where('innings_id', $innings->id)
+            ->get()
+            ->flatMap(function ($b) {
+                return [$b->batter_id, $b->non_striker_id];
+            })
+            ->filter()
+            ->unique()
+            ->all();
+        $battingPlayersCount = count(array_unique(array_merge($currentBattingPlayerIds, $actualBattingPlayerIds)));
+
         $isLastMan = $match->last_man_batting;
         $maxWickets = $battingPlayersCount > 0 
             ? ($isLastMan ? $battingPlayersCount : $battingPlayersCount - 1) 
