@@ -796,7 +796,7 @@ function MatchDetails() {
                             text = "4";
                             colorClass = "bg-blue-600 text-white font-bold";
                           } else if (b.runs === 0 && !b.extra_runs && !b.extra_type) {
-                            text = "•";
+                            text = "0";
                             colorClass = "bg-muted/60 text-muted-foreground flex items-center justify-center font-bold text-base";
                           } else {
                             if (b.extra_type === "wide") text = `${b.extra_runs}wd`;
@@ -1141,7 +1141,7 @@ function MatchDetails() {
                                     text = "4";
                                     colorClass = "bg-blue-600 text-white font-bold";
                                   } else if (b.runs === 0 && !b.extra_runs && !b.extra_type) {
-                                    text = "•";
+                                    text = "0";
                                     colorClass = "bg-muted/60 text-muted-foreground flex items-center justify-center font-bold text-sm";
                                   } else {
                                     if (b.extra_type === "wide") {

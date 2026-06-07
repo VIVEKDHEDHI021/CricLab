@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { MilestoneCelebration } from "@/components/MilestoneCelebration";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { matchService } from "@/lib/services/matchService";
 import { inningsService } from "@/lib/services/inningsService";
 import { ballService } from "@/lib/services/ballService";
@@ -2044,16 +2045,16 @@ function LiveScoring() {
 
   // Custom Header matching CricketHub branding and user layout
   const CustomHeader = (
-    <div className="bg-[#0B1B3D] text-white py-3 px-4 flex items-center justify-between sticky top-0 z-20 shadow-md">
+    <div className="bg-card border-b border-border/80 text-foreground py-3 px-4 flex items-center justify-between sticky top-0 z-20 shadow-md">
       <div className="flex items-center gap-3">
         <button
           onClick={() => nav({ to: "/matches/$id", params: { id } })}
-          className="hover:bg-white/10 p-1.5 rounded-full transition-colors cursor-pointer"
+          className="hover:bg-accent hover:text-accent-foreground p-1.5 rounded-full transition-colors cursor-pointer text-foreground"
           title="Back to Match"
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <span className="font-bold text-base md:text-lg tracking-wide">
+        <span className="font-bold text-base md:text-lg tracking-wide text-foreground">
           CricketHub Scoring
         </span>
         {/* Sync Status Badge */}
@@ -2084,11 +2085,12 @@ function LiveScoring() {
         )}
       </div>
       <div className="flex items-center gap-1.5 sm:gap-2">
+        <ThemeToggle />
         {canScore && currentInn && (
           <button
             onClick={undo}
             disabled={innBalls.length === 0}
-            className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 disabled:opacity-40 hover:bg-white/10 py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer"
+            className="flex items-center gap-1 text-xs font-semibold hover:bg-accent hover:text-accent-foreground disabled:opacity-40 py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer text-foreground"
             title="Undo"
           >
             <RotateCcw className="h-4 w-4" />
@@ -2098,14 +2100,14 @@ function LiveScoring() {
         <button
           onClick={handleManualRefresh}
           disabled={isRefreshing}
-          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 disabled:opacity-40 hover:bg-white/10 py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer"
+          className="flex items-center gap-1 text-xs font-semibold hover:bg-accent hover:text-accent-foreground disabled:opacity-40 py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer text-foreground"
           title="Refresh Scoreboard"
         >
           <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
           <span className="hidden sm:inline">Refresh</span>
         </button>
         <button
-          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 hover:bg-white/10 py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer"
+          className="flex items-center gap-1 text-xs font-semibold hover:bg-accent hover:text-accent-foreground py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer text-foreground"
           onClick={() => setIsMoreOptionsOpen(true)}
           title="Options"
         >
@@ -2117,8 +2119,8 @@ function LiveScoring() {
             toast.success("Match status saved!");
             nav({ to: "/matches/$id", params: { id } });
           }}
-          className="flex items-center gap-1 text-xs font-semibold opacity-90 hover:opacity-100 hover:bg-white/10 py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer"
-          title="Save & Exit"
+          className="flex items-center gap-1 text-xs font-semibold hover:bg-accent hover:text-accent-foreground py-1 px-1.5 sm:px-2 rounded-lg transition-all cursor-pointer text-foreground"
+          title="Save"
         >
           <Save className="h-4 w-4" />
           <span className="hidden sm:inline">Save</span>
@@ -2487,16 +2489,26 @@ function LiveScoring() {
 
           {/* Current Over Card */}
           <Card className="p-4 rounded-2xl border border-border/40 shadow-md">
-            <div className="flex justify-between items-center mb-3">
-              <span className="text-sm font-extrabold text-foreground">
+            <div className="flex justify-between items-start mb-3">
+              <span className="text-sm font-extrabold text-foreground mt-0.5">
                 Current Over ({oversText(currentInn.legal_balls)})
               </span>
-              <span className="text-[11px] text-muted-foreground font-bold tracking-tight">
-                Batting:{" "}
-                <span className="text-foreground font-black">
-                  {playerName(striker) || "—"}
-                </span>
-              </span>
+              <div className="flex flex-col items-end text-[11px] text-muted-foreground font-bold tracking-tight">
+                <div>
+                  Striker:{" "}
+                  <span className="text-primary font-extrabold">
+                    {playerName(striker) || "—"}*
+                  </span>
+                </div>
+                {!isSoloPlay && nonStriker && (
+                  <div>
+                    Non-Striker:{" "}
+                    <span className="text-foreground/80 font-semibold">
+                      {playerName(nonStriker) || "—"}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Balls list (1 to 6 slots) */}
@@ -2525,7 +2537,7 @@ function LiveScoring() {
                     label = "6";
                   } else if (b.runs === 0 && !b.extra_type) {
                     bgClass = "bg-muted/50 text-muted-foreground/50 border border-border/20";
-                    label = "•";
+                    label = "0";
                   } else if (b.extra_type === "wide") {
                     bgClass = "bg-amber-500/15 text-amber-400 font-extrabold border border-amber-500/25";
                     label = "Wd";
@@ -3004,7 +3016,7 @@ function LiveScoring() {
                           val = "6";
                         } else if (b.runs === 0 && !b.extra_type) {
                           bgClass = "bg-muted text-muted-foreground/45 font-extrabold";
-                          val = "•";
+                          val = "0";
                         } else if (b.extra_type === "wide") {
                           bgClass = "bg-amber-500/15 text-amber-400";
                           val = "Wd";

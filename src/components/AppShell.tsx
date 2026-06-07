@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { echoClient, updateEchoAuth } from "@/lib/echo";
 import { PageBuffer } from "@/components/PageBuffer";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export function AppShell({ children, title }: { children: ReactNode; title?: string }) {
   const { user, loading, role, mustChangePassword } = useAuth();
@@ -100,7 +101,10 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
           <div className="text-xl font-bold tracking-tight">
             <span className="text-primary">Cric</span>Lab
           </div>
-          {title && <div className="text-sm text-muted-foreground">{title}</div>}
+          <div className="flex items-center gap-3">
+            {title && <div className="text-sm text-muted-foreground">{title}</div>}
+            <ThemeToggle />
+          </div>
         </header>
       )}
       <main className={hideNav ? "flex-1 pb-8 w-full" : "flex-1 px-4 pt-4 max-w-xl w-full mx-auto pb-28"}>
