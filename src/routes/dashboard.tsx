@@ -156,7 +156,7 @@ function Dashboard() {
     const stored = localStorage.getItem(countKey);
     if (stored) return parseInt(stored);
 
-    const hash = (playerId + heroType).split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const hash = (playerId + heroType).split("").reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
     return 80 + (hash % 70); 
   };
 
@@ -387,7 +387,7 @@ function Dashboard() {
     const sortedWeekly = Object.values(playerWeeklyStats).sort((a, b) => (b.runs + b.wickets * 25) - (a.runs + a.wickets * 25));
     const weeklyHero = sortedWeekly[0];
     if (weeklyHero) {
-      const hash = weeklyHero.player.id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const hash = weeklyHero.player.id.split("").reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
       const followers = 120 + (hash % 150);
 
       cards.push({
@@ -561,6 +561,13 @@ function Dashboard() {
       window.open(url, "_blank");
     }
     setShareCard(null);
+  };
+
+  const triggerShare = (hero: any) => {
+    setShareCard({
+      ...hero,
+      statLine1: `${hero.label1}: ${hero.value1}`
+    });
   };
 
   const onDelete = async (id: string) => {

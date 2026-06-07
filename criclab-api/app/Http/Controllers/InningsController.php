@@ -34,7 +34,7 @@ class InningsController extends Controller
             'current_innings' => $request->innings_no,
         ]);
 
-        \App\Events\MatchUpdated::dispatch($match);
+        \App\Events\MatchUpdated::dispatchSafe($match);
 
         return response()->json($innings, 201);
     }
@@ -50,7 +50,7 @@ class InningsController extends Controller
 
         $innings->update(['is_closed' => true]);
 
-        \App\Events\MatchUpdated::dispatch($match);
+        \App\Events\MatchUpdated::dispatchSafe($match);
 
         return response()->json(['message' => 'Innings closed successfully.']);
     }

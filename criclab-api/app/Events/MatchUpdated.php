@@ -67,4 +67,16 @@ class MatchUpdated implements ShouldBroadcastNow
     {
         return 'MatchUpdated';
     }
+
+    /**
+     * Dispatch the event safely, catching any broadcasting exceptions.
+     */
+    public static function dispatchSafe(CricketMatch $match)
+    {
+        try {
+            static::dispatch($match);
+        } catch (\Throwable $e) {
+            \Log::warning("Failed to broadcast MatchUpdated event: " . $e->getMessage());
+        }
+    }
 }

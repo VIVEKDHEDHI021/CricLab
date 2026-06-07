@@ -160,7 +160,7 @@ class MatchController extends Controller
         // Close all innings for the match
         $match->innings()->update(['is_closed' => true]);
 
-        \App\Events\MatchUpdated::dispatch($match);
+        \App\Events\MatchUpdated::dispatchSafe($match);
 
         return response()->json(['result' => $result]);
     }
@@ -186,7 +186,7 @@ class MatchController extends Controller
             'man_of_the_match_id', 'result', 'ground', 'match_type', 'overs', 'status'
         ]));
 
-        \App\Events\MatchUpdated::dispatch($match);
+        \App\Events\MatchUpdated::dispatchSafe($match);
 
         return response()->json($match);
     }

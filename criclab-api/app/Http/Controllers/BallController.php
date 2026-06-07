@@ -253,7 +253,7 @@ class BallController extends Controller
 
         $ball->refresh();
 
-        \App\Events\MatchUpdated::dispatch($match);
+        \App\Events\MatchUpdated::dispatchSafe($match);
 
         return response()->json($ball, 201);
     }
@@ -314,7 +314,7 @@ class BallController extends Controller
 
         $ball->refresh();
 
-        \App\Events\MatchUpdated::dispatch($match);
+        \App\Events\MatchUpdated::dispatchSafe($match);
 
         return response()->json($ball);
     }
@@ -340,7 +340,7 @@ class BallController extends Controller
 
         self::recalculateInnings($innings->id);
 
-        \App\Events\MatchUpdated::dispatch($match);
+        \App\Events\MatchUpdated::dispatchSafe($match);
 
         return response()->json(['message' => 'Ball deleted successfully.']);
     }

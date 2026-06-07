@@ -1445,7 +1445,7 @@ function MatchDetails() {
 
       {/* Edit Ball Dialog Modal */}
       <Dialog open={isEditBallOpen} onOpenChange={setIsEditBallOpen}>
-        <DialogContent className="max-w-md bg-slate-950 border-border/40 text-foreground p-6 rounded-2xl overflow-hidden shadow-2xl relative">
+        <DialogContent className="max-w-md bg-slate-950 border-border/40 text-foreground p-6 rounded-2xl max-h-[95vh] overflow-y-auto shadow-2xl relative">
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-primary to-purple-500" />
           
           <DialogHeader className="pb-2">
@@ -1464,7 +1464,7 @@ function MatchDetails() {
 
             return (
               <>
-                <div className="space-y-4 my-4 max-h-[60vh] overflow-y-auto pr-1">
+                <div className="space-y-4 my-4 max-h-[50vh] sm:max-h-[60vh] overflow-y-auto pr-1">
                   <div className="space-y-2">
                     <label className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block">Batter</label>
                     <Select value={editBatterId} onValueChange={setEditBatterId}>
