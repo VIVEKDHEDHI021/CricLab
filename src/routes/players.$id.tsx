@@ -316,7 +316,7 @@ function PlayerProfilePage() {
             </Card>
 
             {/* Career Achievements Card */}
-            <Card className="p-4 border border-border/40 bg-gradient-to-br from-slate-900/60 to-slate-950/80 backdrop-blur-md">
+            <Card className="p-4 border border-border/40 bg-card dark:bg-gradient-to-br dark:from-slate-900/60 dark:to-slate-950/80 dark:backdrop-blur-md">
               <h3 className="text-xs font-bold text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
                 <Trophy className="h-3.5 w-3.5 text-primary" /> Permanent Career Achievements
               </h3>

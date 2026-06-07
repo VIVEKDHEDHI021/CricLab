@@ -668,7 +668,7 @@ function Dashboard() {
             </h2>
 
             {past.length < 3 ? (
-              <Card className="p-6 text-center border border-amber-500/20 bg-slate-900/60 backdrop-blur-md rounded-2xl shadow-[0_0_15px_rgba(245,158,11,0.05)] relative overflow-hidden my-1">
+              <Card className="p-6 text-center border border-amber-500/20 bg-card dark:bg-slate-900/60 backdrop-blur-md rounded-2xl shadow-[0_0_15px_rgba(245,158,11,0.05)] relative overflow-hidden my-1">
                 <div className="absolute -top-10 -left-10 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
                 <span className="text-3xl block mb-2 animate-bounce">🏏</span>
                 <h3 className="text-sm font-black text-amber-500 uppercase tracking-widest mb-1.5">Become a CricLab Hero!</h3>
@@ -682,7 +682,7 @@ function Dashboard() {
                 </Link>
               </Card>
             ) : loadingHeroes ? (
-              <Card className="p-8 text-center bg-slate-900/40 border border-border/40 rounded-2xl animate-pulse flex flex-col items-center justify-center gap-2">
+              <Card className="p-8 text-center bg-card dark:bg-slate-900/40 border border-border/40 rounded-2xl animate-pulse flex flex-col items-center justify-center gap-2">
                 <div className="h-4 w-32 bg-muted rounded"></div>
                 <div className="h-3 w-48 bg-muted rounded mt-2"></div>
               </Card>
@@ -694,7 +694,7 @@ function Dashboard() {
                 onTouchEnd={handleTouchEnd}
               >
                 <Card 
-                  className={`p-5 rounded-2xl bg-gradient-to-br from-slate-900/80 via-slate-950/90 to-slate-900/80 border transition-all duration-500 ${
+                  className={`p-5 rounded-2xl bg-card dark:bg-gradient-to-br dark:from-slate-900/80 dark:via-slate-950/90 dark:to-slate-900/80 border transition-all duration-500 ${
                     currentHero.userAppreciated 
                       ? "border-orange-500 shadow-[0_0_20px_rgba(249,115,22,0.3)] scale-[1.01]" 
                       : "border-orange-500/30 shadow-[0_0_15px_rgba(249,115,22,0.1)]"
@@ -718,7 +718,7 @@ function Dashboard() {
 
                   {/* Player & Team Info */}
                   <div className="flex items-center gap-3.5 mb-4">
-                    <div className="h-14 w-14 rounded-full border border-orange-500/50 p-0.5 overflow-hidden bg-slate-950 flex items-center justify-center shrink-0 shadow">
+                    <div className="h-14 w-14 rounded-full border border-orange-500/50 p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0 shadow">
                       {currentHero.avatar ? (
                         <img src={currentHero.avatar} alt={currentHero.playerName} className="h-full w-full object-cover rounded-full" />
                       ) : (
@@ -740,7 +740,7 @@ function Dashboard() {
                   </div>
 
                   {/* Highlight Stats */}
-                  <div className="bg-slate-950/60 rounded-xl border border-border/20 p-3 mb-4 grid grid-cols-2 gap-3 text-center">
+                  <div className="bg-muted/40 rounded-xl border border-border/20 p-3 mb-4 grid grid-cols-2 gap-3 text-center">
                     <div className="min-w-0">
                       <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest block leading-none truncate">
                         {currentHero.label1}
@@ -848,7 +848,7 @@ function Dashboard() {
               
               <div className="grid grid-cols-1 gap-2.5">
                 {rankings.mvp?.[0] && (
-                  <Card className="p-3 border border-amber-500/25 bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
+                  <Card className="p-3 border border-amber-500/25 bg-card dark:bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className="text-2xl shrink-0">🥇</span>
                       <div className="h-10 w-10 rounded-full border border-amber-400 p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0">
@@ -879,7 +879,7 @@ function Dashboard() {
                 )}
 
                 {rankings.batters?.[0] && (
-                  <Card className="p-3 border border-border/40 bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
+                  <Card className="p-3 border border-border/40 bg-card dark:bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className="text-2xl shrink-0">🥈</span>
                       <div className="h-10 w-10 rounded-full border border-border p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0">
@@ -910,7 +910,7 @@ function Dashboard() {
                 )}
 
                 {rankings.bowlers?.[0] && (
-                  <Card className="p-3 border border-border/40 bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
+                  <Card className="p-3 border border-border/40 bg-card dark:bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className="text-2xl shrink-0">🥉</span>
                       <div className="h-10 w-10 rounded-full border border-border p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0">
@@ -965,7 +965,7 @@ function Dashboard() {
 
       {/* Share Modal Dialog */}
       <Dialog open={!!shareCard} onOpenChange={(open) => !open && setShareCard(null)}>
-        <DialogContent className="max-w-xs rounded-2xl bg-slate-900 border border-orange-500/30 text-foreground p-5">
+        <DialogContent className="max-w-xs rounded-2xl bg-card border border-border text-foreground p-5">
           <DialogHeader className="items-center">
             <DialogTitle className="text-sm font-black text-orange-500 uppercase tracking-widest">
               Share Achievement
@@ -973,13 +973,13 @@ function Dashboard() {
           </DialogHeader>
           
           {shareCard && (
-            <div className="my-4 text-center p-4 bg-slate-950 border border-border/20 rounded-xl">
+            <div className="my-4 text-center p-4 bg-muted/40 border border-border/60 rounded-xl">
               <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 bg-orange-500/20 border border-orange-500/40 text-orange-500 rounded">
                 {shareCard.badge}
               </span>
               <h4 className="font-black text-sm text-foreground mt-3">{shareCard.playerName}</h4>
               <p className="text-[10px] text-muted-foreground font-bold uppercase mt-0.5">{shareCard.teamName}</p>
-              <div className="bg-slate-900/60 p-2.5 rounded-lg border border-border/10 my-3 text-xs flex justify-around">
+              <div className="bg-muted/70 p-2.5 rounded-lg border border-border/40 my-3 text-xs flex justify-around">
                 <div>
                   <span className="text-[8px] text-muted-foreground block uppercase font-bold">Stats</span>
                   <span className="font-extrabold text-foreground">{shareCard.statLine1}</span>

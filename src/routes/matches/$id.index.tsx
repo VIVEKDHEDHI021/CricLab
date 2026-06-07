@@ -1445,7 +1445,7 @@ function MatchDetails() {
 
       {/* Edit Ball Dialog Modal */}
       <Dialog open={isEditBallOpen} onOpenChange={setIsEditBallOpen}>
-        <DialogContent className="max-w-md bg-slate-950 border-border/40 text-foreground p-6 rounded-2xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl">
+        <DialogContent className="max-w-md bg-card border-border/40 text-foreground p-6 rounded-2xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl">
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-primary to-purple-500" />
           
           <DialogHeader className="pb-2">

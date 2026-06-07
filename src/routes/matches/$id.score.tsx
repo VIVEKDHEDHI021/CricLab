@@ -2384,7 +2384,7 @@ function LiveScoring() {
           </Card>
 
           {/* Live Match Insights Card */}
-          <Card className="p-4 rounded-2xl border border-border/40 shadow-md bg-gradient-to-br from-slate-900/60 to-slate-950/80 backdrop-blur-md">
+          <Card className="p-4 rounded-2xl border border-border/40 shadow-md bg-card dark:bg-gradient-to-br dark:from-slate-900/60 dark:to-slate-950/80 dark:backdrop-blur-md">
             <h3 className="text-xs font-black text-primary uppercase tracking-widest mb-3 flex items-center gap-1.5">
               <Sparkles className="h-3.5 w-3.5 text-primary" /> Live Match Insights
             </h3>
@@ -2431,14 +2431,14 @@ function LiveScoring() {
               <div className="grid grid-cols-3 gap-2 pb-3 border-b border-border/20">
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Run Rate</span>
-                  <span className="font-extrabold text-white text-sm mt-0.5 block">
+                  <span className="font-extrabold text-foreground text-sm mt-0.5 block">
                     CRR: {currentCRR}
                   </span>
                 </div>
 
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Projected Score</span>
-                  <span className="font-extrabold text-white text-sm mt-0.5 block">
+                  <span className="font-extrabold text-foreground text-sm mt-0.5 block">
                     {projectedScore > 0 ? projectedScore : "—"}
                   </span>
                   <span className="text-[9px] text-muted-foreground block">
@@ -2448,7 +2448,7 @@ function LiveScoring() {
 
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Required Rate</span>
-                  <span className="font-extrabold text-white text-sm mt-0.5 block">
+                  <span className="font-extrabold text-foreground text-sm mt-0.5 block">
                     {secondInningsInfo ? `RRR: ${secondInningsInfo.reqRR}` : "N/A"}
                   </span>
                 </div>
@@ -3551,7 +3551,7 @@ function LiveScoring() {
 
       {/* Floating Undo Banner */}
       {showUndoBanner && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm bg-slate-900/95 backdrop-blur border border-primary/20 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm bg-card/95 backdrop-blur border border-border/80 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-foreground">Ball recorded! Click to undo.</span>
             <Button
@@ -3577,7 +3577,7 @@ function LiveScoring() {
 
       {/* Edit Ball Dialog Modal */}
       <Dialog open={isEditBallOpen} onOpenChange={setIsEditBallOpen}>
-        <DialogContent className="max-w-md bg-slate-950 border-border/40 text-foreground p-6 rounded-2xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl">
+        <DialogContent className="max-w-md bg-card border-border/40 text-foreground p-6 rounded-2xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl">
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-primary to-purple-500" />
           
           <DialogHeader className="pb-2">
