@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ballService } from "@/lib/services/ballService";
 import { echoClient, updateEchoAuth } from "@/lib/echo";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -85,6 +87,83 @@ function MatchDetails() {
       setSubmittingOvers(false);
     }
   };
+
+  // Ball correction states
+  const [isEditBallOpen, setIsEditBallOpen] = useState(false);
+  const [editingBall, setEditingBall] = useState<any>(null);
+  const [editBatterId, setEditBatterId] = useState("");
+  const [editBowlerId, setEditBowlerId] = useState("");
+  const [editRuns, setEditRuns] = useState(0);
+  const [editExtraType, setEditExtraType] = useState("none");
+  const [editExtraRuns, setEditExtraRuns] = useState(0);
+  const [editIsWicket, setEditIsWicket] = useState(false);
+  const [editWicketType, setEditWicketType] = useState("bowled");
+  const [editCaughtById, setEditCaughtById] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const handleBallClick = (b: any) => {
+    if (!(canManage || (user && m && m.created_by === user.id))) return;
+    setEditingBall(b);
+    setEditBatterId(b.batter_id || "");
+    setEditBowlerId(b.bowler_id || "");
+    setEditRuns(b.runs ?? 0);
+    setEditExtraType(b.extra_type || "none");
+    setEditExtraRuns(b.extra_runs ?? 0);
+    setEditIsWicket(!!b.is_wicket);
+    setEditWicketType(b.wicket_type || "bowled");
+    setEditCaughtById(b.caught_by_id || "");
+    setIsEditBallOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingBall) return;
+    setIsSavingEdit(true);
+
+    const isWicket = editIsWicket;
+    const isLegal = !["wide", "no_ball"].includes(editExtraType);
+
+    const payload = {
+      batter_id: editBatterId,
+      non_striker_id: editingBall.non_striker_id,
+      bowler_id: editBowlerId,
+      runs: editRuns,
+      extra_runs: editExtraType === "none" ? 0 : editExtraRuns,
+      extra_type: editExtraType === "none" ? null : editExtraType,
+      is_wicket: isWicket,
+      wicket_type: isWicket ? editWicketType : null,
+      is_legal: isLegal,
+      caught_by_id: (isWicket && editWicketType === "caught") ? editCaughtById || null : null,
+    };
+
+    try {
+      await ballService.updateBall(editingBall.id, payload);
+      toast.success("Ball updated and match recalculated successfully!");
+      setIsEditBallOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["match", id] });
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Failed to update ball");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleDeleteBall = async () => {
+    if (!editingBall) return;
+    if (!confirm("Are you sure you want to delete this ball? This will recalculate the entire match.")) return;
+
+    setIsSavingEdit(true);
+    try {
+      await ballService.undoBall(editingBall.id);
+      toast.success("Ball deleted and match recalculated successfully!");
+      setIsEditBallOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["match", id] });
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Failed to delete ball");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
 
   // Recommendations / player stats calculation
   const playerStats = useMemo(() => {
@@ -1079,12 +1158,16 @@ function MatchDetails() {
                                   }
                                   
                                   return (
-                                    <span 
-                                      key={b.id} 
-                                      className={`w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-bold shadow-sm transition-all hover:scale-105 select-none ${colorClass}`}
+                                    <button 
+                                      key={b.id}
+                                      type="button"
+                                      onClick={() => (canManage || (user && m && m.created_by === user.id)) && handleBallClick(b)}
+                                      className={`w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-bold shadow-sm transition-all select-none ${colorClass} ${
+                                        (canManage || (user && m && m.created_by === user.id)) ? "cursor-pointer hover:scale-110 active:scale-90 border border-border/10" : ""
+                                      }`}
                                     >
                                       {text}
-                                    </span>
+                                    </button>
                                   );
                                 })}
                               </div>
@@ -1357,6 +1440,228 @@ function MatchDetails() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Ball Dialog Modal */}
+      <Dialog open={isEditBallOpen} onOpenChange={setIsEditBallOpen}>
+        <DialogContent className="max-w-md bg-slate-950 border-border/40 text-foreground p-6 rounded-2xl overflow-hidden shadow-2xl relative">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-primary to-purple-500" />
+          
+          <DialogHeader className="pb-2">
+            <DialogTitle className="text-lg font-black text-primary uppercase tracking-widest flex items-center gap-1.5 leading-none">
+              Edit Ball Event
+            </DialogTitle>
+            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mt-1">
+              Correct historical match events
+            </p>
+          </DialogHeader>
+
+          {editingBall && (() => {
+            const ballInnings = innings?.find((inn: any) => inn.id === editingBall.innings_id);
+            const battingPlayers = ballInnings ? players.filter((p: any) => p.team_id === ballInnings.batting_team_id) : [];
+            const bowlingPlayers = ballInnings ? players.filter((p: any) => p.team_id === ballInnings.bowling_team_id) : [];
+
+            return (
+              <>
+                <div className="space-y-4 my-4 max-h-[60vh] overflow-y-auto pr-1">
+                  <div className="space-y-2">
+                    <label className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block">Batter</label>
+                    <Select value={editBatterId} onValueChange={setEditBatterId}>
+                      <SelectTrigger className="w-full h-10 text-xs border-border bg-card text-foreground">
+                        <SelectValue placeholder="Select Batter" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-card border border-border text-foreground text-xs shadow-md">
+                        {battingPlayers.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block">Bowler</label>
+                    <Select value={editBowlerId} onValueChange={setEditBowlerId}>
+                      <SelectTrigger className="w-full h-10 text-xs border-border bg-card text-foreground">
+                        <SelectValue placeholder="Select Bowler" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-card border border-border text-foreground text-xs shadow-md">
+                        {bowlingPlayers.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block">Runs (off bat)</label>
+                      <Select value={String(editRuns)} onValueChange={(v) => setEditRuns(parseInt(v))}>
+                        <SelectTrigger className="w-full h-10 text-xs border-border bg-card text-foreground">
+                          <SelectValue placeholder="Runs" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-card border border-border text-foreground text-xs shadow-md">
+                          {["0", "1", "2", "3", "4", "5", "6"].map((r) => (
+                            <SelectItem key={r} value={r}>{r}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block">Extra Type</label>
+                      <Select value={editExtraType} onValueChange={setEditExtraType}>
+                        <SelectTrigger className="w-full h-10 text-xs border-border bg-card text-foreground">
+                          <SelectValue placeholder="Extra Type" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-card border border-border text-foreground text-xs shadow-md">
+                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem value="wide">Wide</SelectItem>
+                          <SelectItem value="no_ball">No Ball</SelectItem>
+                          <SelectItem value="bye">Bye</SelectItem>
+                          <SelectItem value="leg_bye">Leg Bye</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {editExtraType !== "none" && (
+                    <div className="space-y-2">
+                      <label className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block">Extra Runs</label>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="10"
+                        value={editExtraRuns}
+                        onChange={(e) => setEditExtraRuns(parseInt(e.target.value) || 0)}
+                        className="w-full h-10 text-xs bg-card border-border text-foreground"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between py-2 border-t border-border/20 mt-2">
+                    <span className="text-xs font-semibold text-muted-foreground">Is Wicket?</span>
+                    <button
+                      type="button"
+                      onClick={() => setEditIsWicket(!editIsWicket)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        editIsWicket ? "bg-destructive" : "bg-muted"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          editIsWicket ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {editIsWicket && (
+                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="space-y-2">
+                        <label className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block">Wicket Type</label>
+                        <Select value={editWicketType} onValueChange={setEditWicketType}>
+                          <SelectTrigger className="w-full h-10 text-xs border-border bg-card text-foreground">
+                            <SelectValue placeholder="Wicket Type" />
+                          </SelectTrigger>
+                          <SelectContent className="bg-card border border-border text-foreground text-xs shadow-md">
+                            <SelectItem value="bowled">Bowled</SelectItem>
+                            <SelectItem value="caught">Caught</SelectItem>
+                            <SelectItem value="run_out">Run Out</SelectItem>
+                            <SelectItem value="lbw">LBW</SelectItem>
+                            <SelectItem value="stumped">Stumped</SelectItem>
+                            <SelectItem value="hit_wicket">Hit Wicket</SelectItem>
+                            <SelectItem value="retired_hurt">Retired Hurt</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {editWicketType === "caught" && (
+                        <div className="space-y-2">
+                          <label className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block">Caught By</label>
+                          <Select value={editCaughtById} onValueChange={setEditCaughtById}>
+                            <SelectTrigger className="w-full h-10 text-xs border-border bg-card text-foreground">
+                              <SelectValue placeholder="Select Fielder" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-card border border-border text-foreground text-xs shadow-md">
+                              {bowlingPlayers.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter className="flex flex-col sm:flex-row gap-2 border-t border-border/20 pt-4">
+                  <div className="flex gap-2 mr-auto">
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      onClick={handleDeleteBall}
+                      disabled={isSavingEdit}
+                      className="h-9 text-xs font-bold rounded-xl active:scale-95 cursor-pointer"
+                    >
+                      Delete Ball
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={async () => {
+                        setIsSavingEdit(true);
+                        try {
+                          await ballService.updateBall(editingBall.id, {
+                            batter_id: editingBall.batter_id,
+                            non_striker_id: editingBall.non_striker_id,
+                            bowler_id: editingBall.bowler_id,
+                            runs: editingBall.runs,
+                            extra_runs: editingBall.extra_runs,
+                            extra_type: editingBall.extra_type,
+                            is_wicket: editingBall.is_wicket,
+                            wicket_type: editingBall.wicket_type,
+                            is_legal: editingBall.is_legal,
+                            caught_by_id: editingBall.caught_by_id,
+                          });
+                          toast.success("Recalculation completed");
+                          queryClient.invalidateQueries({ queryKey: ["match", id] });
+                          setIsEditBallOpen(false);
+                        } catch (err: any) {
+                          toast.error(err.response?.data?.message || err.message || "Recalculation failed");
+                        } finally {
+                          setIsSavingEdit(false);
+                        }
+                      }}
+                      disabled={isSavingEdit}
+                      className="h-9 text-xs font-bold border-primary/20 text-primary hover:bg-primary/10 rounded-xl active:scale-95 cursor-pointer"
+                    >
+                      Recalculate
+                    </Button>
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsEditBallOpen(false)}
+                      disabled={isSavingEdit}
+                      className="h-9 text-xs font-bold rounded-xl cursor-pointer"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleSaveEdit}
+                      disabled={isSavingEdit}
+                      className="h-9 text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 rounded-xl active:scale-95 cursor-pointer"
+                    >
+                      {isSavingEdit ? "Saving..." : "Save Changes"}
+                    </Button>
+                  </div>
+                </DialogFooter>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
