@@ -64,6 +64,7 @@ Route::middleware(['auth:sanctum', 'force_password_change'])->group(function () 
 
         // Live scoring actions
         Route::post('/matches/{matchId}/innings', [InningsController::class, 'startInnings']);
+        Route::patch('/innings/{id}/close', [InningsController::class, 'closeInnings']);
         Route::post('/innings/{inningsId}/balls', [BallController::class, 'store']);
         Route::delete('/balls/{id}', [BallController::class, 'destroy']);
         Route::patch('/matches/{id}/end', [MatchController::class, 'end']);
