@@ -45,6 +45,7 @@ import {
   Award,
 } from "lucide-react";
 import { WinnerCelebrationOverlay } from "@/components/WinnerCelebrationOverlay";
+import { backupService } from "@/lib/services/backupService";
 
 export const Route = createFileRoute("/matches/$id/score")({ component: LiveScoring });
 
@@ -297,6 +298,15 @@ function LiveScoring() {
 
   const [matchEndedAuto, setMatchEndedAuto] = useState(false);
   const [firstInnEndedAuto, setFirstInnEndedAuto] = useState(false);
+
+  const [showBackupDialog, setShowBackupDialog] = useState(false);
+  const [backupDialogMetadata, setBackupDialogMetadata] = useState<{
+    winnerTeamName: string;
+    margin: string;
+    date: string;
+    teams: string;
+    result: string;
+  } | null>(null);
 
   useEffect(() => {
     if (innings && innings.length > 0) {
@@ -1178,8 +1188,35 @@ function LiveScoring() {
   }, [currentInn, firstInnings, match, teamName]);
 
   const disabledBowlers = useMemo(() => {
-    return new Set<string>();
-  }, []);
+    const disabled: Record<string, string> = {};
+    if (currentInn) {
+      const currentOverNo = Math.floor((currentInn.legal_balls ?? 0) / 6);
+      const prevOverNo = currentOverNo - 1;
+      if (prevOverNo >= 0) {
+        const prevOverBall = [...innBalls].reverse().find((b) => b.over_number === prevOverNo);
+        if (prevOverBall && prevOverBall.bowler_id) {
+          disabled[prevOverBall.bowler_id] = "Consecutive over";
+        }
+      }
+    }
+    return disabled;
+  }, [currentInn, innBalls]);
+
+  const strikerDisabledOptions = useMemo(() => {
+    const disabled: Record<string, string> = {};
+    if (nonStriker) {
+      disabled[nonStriker] = "Non-striker";
+    }
+    return disabled;
+  }, [nonStriker]);
+
+  const nonStrikerDisabledOptions = useMemo(() => {
+    const disabled: Record<string, string> = {};
+    if (striker) {
+      disabled[striker] = "Striker";
+    }
+    return disabled;
+  }, [striker]);
 
   const swapStrike = () => {
     if (isSoloPlay || isLastManActive) {
@@ -1379,17 +1416,97 @@ function LiveScoring() {
   }, [isFirstInningsCompleted, firstInnEndedAuto, currentInn]);
 
   const finalizeMatch = async () => {
+    let dateStr = new Date().toISOString().split('T')[0];
+    let teamsStr = "Teams";
+    let resultStr = "Match Completed";
+
+    if (match) {
+      const teamA = teams.find((t: any) => t.id === match.team_a_id)?.name || 'Team A';
+      const teamB = teams.find((t: any) => t.id === match.team_b_id)?.name || 'Team B';
+      teamsStr = `${teamA} vs ${teamB}`;
+      dateStr = new Date(match.match_date).toISOString().split('T')[0];
+      resultStr = winnerCelebration?.margin || 'Match Completed';
+    }
+
     try {
       const data = await matchService.endMatch(id);
-      toast.success(data.result);
+      toast.success(data.result || "Match finished!");
       queryClient.invalidateQueries({ queryKey: ["match", id] });
       queryClient.invalidateQueries({ queryKey: ["matches"] });
       queryClient.invalidateQueries({ queryKey: ["manOfTheDay"] });
       queryClient.invalidateQueries({ queryKey: ["playerRankings"] });
-      nav({ to: "/matches/$id", params: { id } });
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message);
+      console.warn("Failed to sync match end to server:", err);
+      toast.warning("Server synchronization failed, match marked completed locally.");
     }
+
+    // Cache the completed match details locally before exporting
+    const detail = {
+      m: { ...match, status: 'past', is_closed: true, result: resultStr },
+      teams,
+      innings: optimisticInnings,
+      players,
+      balls: combinedBalls
+    };
+    localStorage.setItem(`criclab_match_cache_${id}`, JSON.stringify(detail));
+
+    // Open backup prompt
+    setBackupDialogMetadata({
+      winnerTeamName: winnerCelebration?.winnerTeamName || "Winner",
+      margin: winnerCelebration?.margin || "Match Finished",
+      date: dateStr,
+      teams: teamsStr,
+      result: resultStr,
+    });
+    setWinnerCelebration(null);
+    setShowBackupDialog(true);
+  };
+
+  const handleSaveBackup = () => {
+    if (!backupDialogMetadata) return;
+    try {
+      const detail = {
+        m: { ...match, status: 'past', is_closed: true, result: backupDialogMetadata.result },
+        teams,
+        innings: optimisticInnings,
+        players,
+        balls: combinedBalls
+      };
+      const backupData = backupService.generateSingleMatchBackupJSON(id, detail);
+      
+      const cleanTeamsStr = backupDialogMetadata.teams.replace(/\s+/g, '_');
+      const version = backupData.backupVersion || 1;
+      const filename = `${cleanTeamsStr}_v${version}.json`;
+      
+      backupService.downloadBackupFile(filename, backupData);
+      backupService.saveLocalBackup(id, backupData);
+      
+      toast.success("Backup downloaded and saved to local backups!");
+    } catch (e: any) {
+      toast.error("Failed to generate backup: " + e.message);
+    } finally {
+      setShowBackupDialog(false);
+      nav({ to: "/matches/$id", params: { id } });
+    }
+  };
+
+  const handleNotNowBackup = () => {
+    if (!backupDialogMetadata) return;
+    const localVersion = parseInt(localStorage.getItem(`criclab_match_local_version_${id}`) || '1', 10);
+    const cloudVersion = parseInt(localStorage.getItem(`criclab_match_cloud_version_${id}`) || '1', 10);
+    const correctionVersion = parseInt(localStorage.getItem(`criclab_match_correction_version_${id}`) || '1', 10);
+    const backupVersion = Math.max(localVersion, cloudVersion, correctionVersion);
+
+    backupService.markBackupPending(id, {
+      date: backupDialogMetadata.date,
+      teams: backupDialogMetadata.teams,
+      result: backupDialogMetadata.result,
+      version: backupVersion
+    });
+
+    toast.info("Backup capability saved. You can export later from the Backup Center.");
+    setShowBackupDialog(false);
+    nav({ to: "/matches/$id", params: { id } });
   };
 
   const endInnings = async () => {
@@ -2916,6 +3033,7 @@ function LiveScoring() {
                 onChange={setStriker}
                 options={activeBattingPlayers}
                 disabled={isLocked}
+                disabledOptions={strikerDisabledOptions}
               />
               {!isSoloPlay && (
                 <PSelect
@@ -2924,6 +3042,7 @@ function LiveScoring() {
                   onChange={setNonStriker}
                   options={activeBattingPlayers}
                   disabled={isLocked || isLastManRemaining}
+                  disabledOptions={nonStrikerDisabledOptions}
                 />
               )}
               <PSelect
@@ -3549,6 +3668,52 @@ function LiveScoring() {
         />
       )}
 
+      {/* Match Completed Backup Dialog */}
+      <Dialog open={showBackupDialog} onOpenChange={(open) => { if (!open) handleNotNowBackup(); }}>
+        <DialogContent className="max-w-md bg-gradient-to-b from-slate-900 to-slate-950 border border-primary/20 rounded-3xl p-6 shadow-2xl text-center text-foreground z-[12000]">
+          <div className="flex flex-col items-center gap-4">
+            <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20 animate-bounce">
+              <Trophy className="h-8 w-8 text-primary" />
+            </div>
+            
+            <h2 className="text-xl font-black tracking-tight text-white uppercase flex items-center gap-1.5 justify-center">
+              🏁 MATCH COMPLETED
+            </h2>
+            
+            {backupDialogMetadata && (
+              <div className="space-y-2">
+                <p className="text-base font-bold text-amber-400">
+                  {backupDialogMetadata.winnerTeamName}
+                </p>
+                <p className="text-sm font-semibold text-white/90">
+                  {backupDialogMetadata.margin}
+                </p>
+              </div>
+            )}
+            
+            <p className="text-xs text-muted-foreground leading-relaxed px-2">
+              Save this match backup to your device? This allows you to restore the match even if servers become unavailable.
+            </p>
+            
+            <div className="w-full grid grid-cols-2 gap-3 mt-4">
+              <Button
+                variant="outline"
+                onClick={handleNotNowBackup}
+                className="py-5 font-bold uppercase text-xs rounded-xl border-white/10 hover:bg-white/5 active:scale-95 transition-transform"
+              >
+                ⏰ Not Now
+              </Button>
+              <Button
+                onClick={handleSaveBackup}
+                className="py-5 font-black uppercase text-xs rounded-xl bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500 hover:opacity-95 text-slate-950 shadow-lg shadow-orange-500/20 active:scale-95 transition-transform"
+              >
+                📦 Save Backup
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Floating Undo Banner */}
       {showUndoBanner && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm bg-card/95 backdrop-blur border border-border/80 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-300">
@@ -3814,7 +3979,7 @@ function PSelect({
   onChange: (v: string) => void;
   options: any[];
   disabled?: boolean;
-  disabledOptions?: Set<string>;
+  disabledOptions?: Record<string, string>;
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -3825,10 +3990,11 @@ function PSelect({
         </SelectTrigger>
         <SelectContent className="bg-card border border-border text-foreground text-xs shadow-md">
           {options.map((p) => {
-            const isOptDisabled = disabledOptions?.has(p.id);
+            const disableReason = disabledOptions?.[p.id];
+            const isOptDisabled = !!disableReason;
             return (
               <SelectItem key={p.id} value={p.id} disabled={isOptDisabled}>
-                {p.name} {isOptDisabled ? " (Consecutive over)" : ""}
+                {p.name} {isOptDisabled ? ` (${disableReason})` : ""}
               </SelectItem>
             );
           })}

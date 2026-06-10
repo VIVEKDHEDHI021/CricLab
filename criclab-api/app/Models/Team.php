@@ -4,12 +4,13 @@ namespace App\Models;
 
 use App\Traits\HasUuid;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 
 #[Fillable(['name', 'created_by'])]
 class Team extends Model
 {
-    use HasUuid;
+    use HasUuid, SoftDeletes;
 
     public function players()
     {
@@ -19,5 +20,10 @@ class Team extends Model
     public function creator()
     {
         return $this->belongsTo(Account::class, 'created_by');
+    }
+
+    public function getNameAttribute($value)
+    {
+        return $this->trashed() ? $value . ' (Deleted)' : $value;
     }
 }

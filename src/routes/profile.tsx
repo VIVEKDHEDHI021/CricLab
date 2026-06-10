@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { authService } from "@/lib/services/authService";
 import { playerService, type PlayerProfile, type Player } from "@/lib/services/playerService";
+import { backupService } from "@/lib/services/backupService";
 import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -74,6 +75,10 @@ function UserProfilePage() {
   // Google connection states
   const [gsiLoaded, setGsiLoaded] = useState(false);
   const [linkBusy, setLinkBusy] = useState(false);
+
+  // Backup & Restore states
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     const handleScriptLoad = () => setGsiLoaded(true);
@@ -169,6 +174,74 @@ function UserProfilePage() {
             )}
           </div>
         )}
+      </Card>
+    );
+  };
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const data = await backupService.exportBackup();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const dateStr = new Date().toISOString().slice(0, 10);
+      link.href = url;
+      link.download = `criclab_backup_${dateStr}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success("Backup exported successfully!");
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Failed to export backup");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!window.confirm("Are you sure you want to restore data from this backup? This will sync matches, teams, and players into your local database.")) {
+      e.target.value = "";
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const res = await backupService.importBackup(file);
+      toast.success(res.message || "Backup restored successfully!");
+      fetchProfile();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Failed to restore backup");
+    } finally {
+      setImporting(false);
+      e.target.value = "";
+    }
+  };
+
+  const renderBackupSection = () => {
+    return (
+      <Card className="p-5 border-border bg-card/60 backdrop-blur rounded-2xl space-y-3 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-full blur-xl pointer-events-none" />
+        <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+          <Shield className="h-4 w-4 text-primary" />
+          Universal Backup Center
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          Access the local-first backup control center to generate versioned JSON backups, save scorecards to PDF, share matches, or restore records offline.
+        </p>
+        <div className="pt-1">
+          <Link to="/backup-center">
+            <Button
+              type="button"
+              className="w-full flex items-center justify-center gap-2 text-xs h-10 bg-gradient-to-r from-orange-500 to-amber-500 hover:opacity-95 text-slate-950 font-black uppercase tracking-wider rounded-xl shadow-md transition-transform active:scale-95 cursor-pointer"
+            >
+              📂 Open Backup Center
+            </Button>
+          </Link>
+        </div>
       </Card>
     );
   };
@@ -299,6 +372,7 @@ function UserProfilePage() {
           </Card>
 
           {renderGoogleSection()}
+          {renderBackupSection()}
 
           <Card className="p-6 border-dashed border-border/80 bg-card/20 rounded-2xl flex flex-col items-center text-center space-y-3">
             <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
@@ -395,6 +469,7 @@ function UserProfilePage() {
         </Card>
 
         {renderGoogleSection()}
+        {renderBackupSection()}
 
         {/* Dynamic Detail Tabs */}
         <Tabs defaultValue="overview" className="w-full">

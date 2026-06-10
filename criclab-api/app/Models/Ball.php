@@ -32,21 +32,21 @@ class Ball extends Model
 
     public function batter()
     {
-        return $this->belongsTo(Player::class, 'batter_id');
+        return $this->belongsTo(Player::class, 'batter_id')->withTrashed();
     }
 
     public function nonStriker()
     {
-        return $this->belongsTo(Player::class, 'non_striker_id');
+        return $this->belongsTo(Player::class, 'non_striker_id')->withTrashed();
     }
 
     public function bowler()
     {
-        return $this->belongsTo(Player::class, 'bowler_id');
+        return $this->belongsTo(Player::class, 'bowler_id')->withTrashed();
     }
 
     public function caughtBy()
     {
-        return $this->belongsTo(Player::class, 'caught_by_id');
+        return $this->belongsTo(Player::class, 'caught_by_id')->withTrashed();
     }
 }

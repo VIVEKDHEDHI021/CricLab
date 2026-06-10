@@ -30,29 +30,8 @@ class TeamController extends Controller
     {
         $team = Team::findOrFail($id);
 
-        // Find all matches played by this team
-        $matches = \App\Models\CricketMatch::where('team_a_id', $team->id)
-            ->orWhere('team_b_id', $team->id)
-            ->get();
-
-        foreach ($matches as $match) {
-            // Decrement catches for players who took catches in this match
-            $caughtBalls = \App\Models\Ball::where('match_id', $match->id)
-                ->where('is_wicket', true)
-                ->where('wicket_type', 'caught')
-                ->whereNotNull('caught_by_id')
-                ->get();
-
-            foreach ($caughtBalls as $ball) {
-                $catcher = \App\Models\Player::find($ball->caught_by_id);
-                if ($catcher) {
-                    $catcher->update([
-                        'catches' => max(0, $catcher->catches - 1)
-                    ]);
-                }
-            }
-            $match->delete();
-        }
+        // Dissociate players from the deleted team
+        $team->players()->update(['team_id' => null]);
 
         $team->delete();
         return response()->json(['message' => 'Team deleted successfully.']);

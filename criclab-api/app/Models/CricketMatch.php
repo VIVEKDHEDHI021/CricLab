@@ -24,17 +24,17 @@ class CricketMatch extends Model
 
     public function teamA()
     {
-        return $this->belongsTo(Team::class, 'team_a_id');
+        return $this->belongsTo(Team::class, 'team_a_id')->withTrashed();
     }
 
     public function teamB()
     {
-        return $this->belongsTo(Team::class, 'team_b_id');
+        return $this->belongsTo(Team::class, 'team_b_id')->withTrashed();
     }
 
     public function battingFirst()
     {
-        return $this->belongsTo(Team::class, 'batting_first_id');
+        return $this->belongsTo(Team::class, 'batting_first_id')->withTrashed();
     }
 
     public function innings()
@@ -54,6 +54,6 @@ class CricketMatch extends Model
 
     public function manOfTheMatch()
     {
-        return $this->belongsTo(Player::class, 'man_of_the_match_id');
+        return $this->belongsTo(Player::class, 'man_of_the_match_id')->withTrashed();
     }
 }

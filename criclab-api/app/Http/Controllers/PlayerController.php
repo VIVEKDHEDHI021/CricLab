@@ -162,10 +162,10 @@ class PlayerController extends Controller
 
     public function show($id)
     {
-        $player = Player::with('team')->findOrFail($id);
+        $player = Player::withTrashed()->with('team')->findOrFail($id);
         
         // Aggregate by mobile if available, else by unique ID
-        $playerIds = $player->mobile ? Player::where('mobile', $player->mobile)->pluck('id')->all() : [$player->id];
+        $playerIds = $player->mobile ? Player::withTrashed()->where('mobile', $player->mobile)->pluck('id')->all() : [$player->id];
 
         // Only look at finished matches for official player profiles
         $pastMatchIds = CricketMatch::where('status', 'past')->pluck('id')->all();
@@ -237,7 +237,7 @@ class PlayerController extends Controller
         if ($player->team_id) {
             $teamIds[] = $player->team_id;
         }
-        $teams = \App\Models\Team::whereIn('id', array_unique($teamIds))->get(['id', 'name']);
+        $teams = \App\Models\Team::withTrashed()->whereIn('id', array_unique($teamIds))->get(['id', 'name']);
 
         // Match-by-match history
         $history = [];

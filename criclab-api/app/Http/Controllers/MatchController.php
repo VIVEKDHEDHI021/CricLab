@@ -45,7 +45,7 @@ class MatchController extends Controller
     public function show($id)
     {
         $match = CricketMatch::findOrFail($id);
-        $teams = Team::whereIn('id', [$match->team_a_id, $match->team_b_id])->get();
+        $teams = Team::withTrashed()->whereIn('id', [$match->team_a_id, $match->team_b_id])->get();
         $innings = $match->innings()->orderBy('innings_no')->get();
         $balls = $match->balls()->orderBy('ball_index')->get();
 
@@ -54,7 +54,8 @@ class MatchController extends Controller
             return [$b->batter_id, $b->non_striker_id, $b->bowler_id, $b->caught_by_id];
         })->filter()->unique()->all();
 
-        $players = Player::whereIn('team_id', [$match->team_a_id, $match->team_b_id])
+        $players = Player::withTrashed()
+            ->whereIn('team_id', [$match->team_a_id, $match->team_b_id])
             ->orWhereIn('id', $referencedPlayerIds)
             ->get();
 

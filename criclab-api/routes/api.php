@@ -7,6 +7,7 @@ use App\Http\Controllers\InningsController;
 use App\Http\Controllers\MatchController;
 use App\Http\Controllers\PlayerController;
 use App\Http\Controllers\TeamController;
+use App\Http\Controllers\BackupController;
 use App\Services\AdminAccountService;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Broadcast;
@@ -76,6 +77,10 @@ Route::middleware(['auth:sanctum', 'force_password_change'])->group(function () 
     Route::get('/friends', [FriendController::class, 'index']);
     Route::post('/friends', [FriendController::class, 'store']);
     Route::delete('/friends/{id}', [FriendController::class, 'destroy']);
+
+    // Backup & Restore
+    Route::get('/backup/export', [BackupController::class, 'export']);
+    Route::post('/backup/import', [BackupController::class, 'import']);
 
     // Admin-only management
     Route::middleware('admin')->group(function () {
