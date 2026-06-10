@@ -1334,6 +1334,42 @@ function NewMatch() {
           {/* STEP 3: TEAM REVIEW SCREEN */}
           {step === 3 && (
             <div className="space-y-6">
+              {/* Who Bats First selector in Review */}
+              <div className="p-4 bg-card/45 border border-border/80 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4 backdrop-blur-md shadow-md">
+                <div>
+                  <h4 className="text-xs font-black text-primary uppercase tracking-wider">
+                    🏏 First Innings Batting Team
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground font-medium mt-0.5">
+                    Select which team will bat first in this match.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2 bg-background/50 border border-border/80 p-1 rounded-xl w-full md:w-80 h-10 items-center">
+                  <button
+                    type="button"
+                    onClick={() => setBattingFirst('a')}
+                    className={`h-8 px-4 text-xs font-black rounded-lg transition-all truncate ${
+                      battingFirst === 'a'
+                        ? "bg-primary text-primary-foreground shadow-md"
+                        : "hover:bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    🏏 {teamAName || "Team A"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBattingFirst('b')}
+                    className={`h-8 px-4 text-xs font-black rounded-lg transition-all truncate ${
+                      battingFirst === 'b'
+                        ? "bg-primary text-primary-foreground shadow-md"
+                        : "hover:bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    🏏 {teamBName || "Team B"}
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Roster A Review */}
                 <div className="p-5 bg-card/45 border border-border/80 rounded-3xl space-y-4 shadow-md backdrop-blur-md">
