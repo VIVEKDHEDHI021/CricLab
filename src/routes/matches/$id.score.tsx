@@ -2628,58 +2628,63 @@ function LiveScoring() {
               </div>
             </div>
 
-            {/* Balls list (1 to 6 slots) */}
+            {/* Balls list (1 to 6 slots, expanding dynamically for extras) */}
             <div className="grid grid-cols-6 gap-2 mb-4">
-              {[0, 1, 2, 3, 4, 5].map((idx) => {
+              {(() => {
                 const currentOverNo = Math.floor((currentInn.legal_balls ?? 0) / 6);
                 const currentOverBalls = innBalls.filter(
                   (b) => b.over_number === currentOverNo,
                 );
-                const b = currentOverBalls[idx];
+                const slotsCount = currentOverBalls.length >= 6 ? currentOverBalls.length + 1 : 6;
+                const slots = Array.from({ length: slotsCount }, (_, i) => i);
 
-                let bgClass = "bg-muted/30 border border-border/30 text-muted-foreground/30";
-                let label = "-";
+                return slots.map((idx) => {
+                  const b = currentOverBalls[idx];
 
-                if (b) {
-                  label = String(b.runs);
-                  bgClass = "bg-muted/80 text-foreground font-bold border border-border/40";
-                  if (b.is_wicket) {
-                    bgClass = "bg-destructive text-destructive-foreground font-extrabold shadow-sm";
-                    label = "W";
-                  } else if (b.runs === 4) {
-                    bgClass = "bg-blue-600 text-white font-extrabold shadow-sm";
-                    label = "4";
-                  } else if (b.runs === 6) {
-                    bgClass = "bg-purple-600 text-white font-extrabold shadow-sm";
-                    label = "6";
-                  } else if (b.runs === 0 && !b.extra_type) {
-                    bgClass = "bg-muted/50 text-muted-foreground/50 border border-border/20";
-                    label = "0";
-                  } else if (b.extra_type === "wide") {
-                    bgClass = "bg-amber-500/15 text-amber-400 font-extrabold border border-amber-500/25";
-                    label = "Wd";
-                  } else if (b.extra_type === "no_ball") {
-                    bgClass = "bg-purple-500/15 text-purple-400 font-extrabold border border-purple-500/25";
-                    label = "Nb";
+                  let bgClass = "bg-muted/30 border border-border/30 text-muted-foreground/30";
+                  let label = "-";
+
+                  if (b) {
+                    label = String(b.runs);
+                    bgClass = "bg-muted/80 text-foreground font-bold border border-border/40";
+                    if (b.is_wicket) {
+                      bgClass = "bg-destructive text-destructive-foreground font-extrabold shadow-sm";
+                      label = "W";
+                    } else if (b.runs === 4) {
+                      bgClass = "bg-blue-600 text-white font-extrabold shadow-sm";
+                      label = "4";
+                    } else if (b.runs === 6) {
+                      bgClass = "bg-purple-600 text-white font-extrabold shadow-sm";
+                      label = "6";
+                    } else if (b.runs === 0 && !b.extra_type) {
+                      bgClass = "bg-muted/50 text-muted-foreground/50 border border-border/20";
+                      label = "0";
+                    } else if (b.extra_type === "wide") {
+                      bgClass = "bg-amber-500/15 text-amber-400 font-extrabold border border-amber-500/25";
+                      label = "Wd";
+                    } else if (b.extra_type === "no_ball") {
+                      bgClass = "bg-purple-500/15 text-purple-400 font-extrabold border border-purple-500/25";
+                      label = "Nb";
+                    }
                   }
-                }
 
-                return (
-                  <div key={idx} className="flex flex-col items-center gap-1">
-                    <span className="text-[10px] text-muted-foreground font-bold">
-                      {idx + 1}
-                    </span>
-                    <div
-                      onClick={() => b && handleBallClick(b)}
-                      className={`w-full aspect-square rounded-xl flex items-center justify-center text-xs font-black shadow-sm ${bgClass} ${
-                        b && canScore ? "cursor-pointer hover:scale-105 active:scale-95 transition-all hover:brightness-110" : ""
-                      }`}
-                    >
-                      {label}
+                  return (
+                    <div key={idx} className="flex flex-col items-center gap-1">
+                      <span className="text-[10px] text-muted-foreground font-bold">
+                        {idx + 1}
+                      </span>
+                      <div
+                        onClick={() => b && handleBallClick(b)}
+                        className={`w-full aspect-square rounded-xl flex items-center justify-center text-xs font-black shadow-sm ${bgClass} ${
+                          b && canScore ? "cursor-pointer hover:scale-105 active:scale-95 transition-all hover:brightness-110" : ""
+                        }`}
+                      >
+                        {label}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
 
             {/* Scoring Panel Buttons (Interactive modifier layout - no modals, fast taps) */}

@@ -771,7 +771,7 @@ function NewMatch() {
                 <div className="p-5 bg-card/45 border border-border/80 rounded-3xl relative flex flex-col gap-3 shadow-md backdrop-blur-md">
                   <div className="flex justify-between items-center">
                     <Label className="text-xs font-black text-primary uppercase tracking-widest flex items-center gap-1">
-                      🏏 Team A {battingFirst === 'a' ? '(Batting First)' : '(Bowling First)'}
+                      🏏 Team A
                     </Label>
                   </div>
                   
@@ -857,7 +857,7 @@ function NewMatch() {
                 <div className="p-5 bg-card/45 border border-border/80 rounded-3xl relative flex flex-col gap-3 shadow-md backdrop-blur-md">
                   <div className="flex justify-between items-center">
                     <Label className="text-xs font-black text-primary uppercase tracking-widest flex items-center gap-1">
-                      🏏 Team B {battingFirst === 'b' ? '(Batting First)' : '(Bowling First)'}
+                      🏏 Team B
                     </Label>
                   </div>
                   
@@ -996,33 +996,7 @@ function NewMatch() {
                     </Select>
                   </div>
 
-                  <div className="space-y-1">
-                    <Label className="text-xs font-bold text-muted-foreground uppercase">Who Bats First?</Label>
-                    <div className="grid grid-cols-2 gap-1.5 bg-background border border-border p-1 rounded-md h-9 items-center">
-                      <button
-                        type="button"
-                        onClick={() => setBattingFirst('a')}
-                        className={`h-7 px-2 text-xs font-extrabold rounded transition-all truncate ${
-                          battingFirst === 'a'
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "hover:bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        🏏 {teamAName.trim() || "Team A"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setBattingFirst('b')}
-                        className={`h-7 px-2 text-xs font-extrabold rounded transition-all truncate ${
-                          battingFirst === 'b'
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "hover:bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        🏏 {teamBName.trim() || "Team B"}
-                      </button>
-                    </div>
-                  </div>
+
 
                   <div className="space-y-1">
                     <Label className="text-xs font-bold text-muted-foreground uppercase">Match Type Tag</Label>
