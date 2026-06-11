@@ -133,7 +133,8 @@ class MatchController extends Controller
         if ($match->squad_a_ids !== $squadA || $match->squad_b_ids !== $squadB) {
             $match->squad_a_ids = $squadA;
             $match->squad_b_ids = $squadB;
-            $match->save();
+            // Note: We do not call $match->save() here to avoid database locks or 
+            // read-only database errors during GET requests (e.g. on serverless environments).
         }
 
         $allSquadIds = array_unique(array_merge($squadA, $squadB));
