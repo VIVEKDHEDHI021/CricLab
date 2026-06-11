@@ -31,6 +31,8 @@ export const matchService = {
     match_date: string;
     last_man_batting?: boolean;
     batting_first_id?: string;
+    squad_a_ids?: string[];
+    squad_b_ids?: string[];
   }): Promise<{ id: string }> {
     const { data } = await api.post<{ id: string }>('/matches', {
       ...matchData,

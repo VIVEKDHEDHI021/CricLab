@@ -714,6 +714,8 @@ function NewMatch() {
         match_date: form.match_date,
         last_man_batting: form.last_man_batting,
         batting_first_id: battingFirst === 'a' ? finalTeamAId : finalTeamBId,
+        squad_a_ids: finalPlayerIdsA,
+        squad_b_ids: finalPlayerIdsB,
       });
 
       // 6. Initialize Innings 1

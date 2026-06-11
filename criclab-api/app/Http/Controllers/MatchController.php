@@ -173,6 +173,8 @@ class MatchController extends Controller
             'status' => 'required|string|in:upcoming,live,past',
             'batting_first_id' => 'required|uuid|exists:teams,id',
             'last_man_batting' => 'nullable|boolean',
+            'squad_a_ids' => 'nullable|array',
+            'squad_b_ids' => 'nullable|array',
         ]);
 
         $match = CricketMatch::create([
@@ -188,6 +190,8 @@ class MatchController extends Controller
             'batting_first_id' => $request->batting_first_id,
             'last_man_batting' => $request->last_man_batting ?? false,
             'created_by' => $request->user()->id,
+            'squad_a_ids' => $request->squad_a_ids ?? [],
+            'squad_b_ids' => $request->squad_b_ids ?? [],
         ]);
 
         return response()->json($match, 201);
