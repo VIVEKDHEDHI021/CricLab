@@ -912,8 +912,28 @@ function MatchDetails() {
           {innings.length > 0 ? (
             innings.map((inn: any) => {
               const innBalls = (balls ?? []).filter((b: any) => b.innings_id === inn.id);
-              const battingTeamPlayers = players.filter((p: any) => p.team_id === inn.batting_team_id);
-              const bowlingTeamPlayers = players.filter((p: any) => p.team_id === inn.bowling_team_id);
+
+              // Get all unique player IDs who participated in this innings as batter or bowler
+              const activeBatterIds = Array.from(new Set(innBalls.map((b: any) => b.batter_id).filter(Boolean)));
+              const activeBowlerIds = Array.from(new Set(innBalls.map((b: any) => b.bowler_id).filter(Boolean)));
+
+              // For batting team: start with players matching batting_team_id, but ensure we add any active batters in innBalls who might be missing
+              const battingTeamPlayers = (players ?? []).filter((p: any) => p.team_id === inn.batting_team_id);
+              activeBatterIds.forEach((id: any) => {
+                if (!battingTeamPlayers.some((p: any) => p.id === id)) {
+                  const foundPlayer = (players ?? []).find((p: any) => p.id === id) || { id, name: "Unknown Player" };
+                  battingTeamPlayers.push(foundPlayer);
+                }
+              });
+
+              // For bowling team: start with players matching bowling_team_id, but ensure we add any active bowlers in innBalls who might be missing
+              const bowlingTeamPlayers = (players ?? []).filter((p: any) => p.team_id === inn.bowling_team_id);
+              activeBowlerIds.forEach((id: any) => {
+                if (!bowlingTeamPlayers.some((p: any) => p.id === id)) {
+                  const foundPlayer = (players ?? []).find((p: any) => p.id === id) || { id, name: "Unknown Player" };
+                  bowlingTeamPlayers.push(foundPlayer);
+                }
+              });
 
               const batterStats = battingTeamPlayers.map(p => {
                 const facedBalls = innBalls.filter(b => b.batter_id === p.id && b.is_legal);

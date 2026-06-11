@@ -163,6 +163,8 @@ class BackupController extends Controller
                         'created_by' => $createdBy,
                         'last_man_batting' => $row['last_man_batting'] ?? false,
                         'man_of_the_match_id' => $row['man_of_the_match_id'] ?? null,
+                        'squad_a_ids' => $row['squad_a_ids'] ?? null,
+                        'squad_b_ids' => $row['squad_b_ids'] ?? null,
                         'created_at' => $row['created_at'] ?? now(),
                         'updated_at' => $row['updated_at'] ?? now(),
                     ])->save();
