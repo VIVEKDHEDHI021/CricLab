@@ -189,7 +189,7 @@ function LiveScoring() {
   const nav = useNavigate();
   const { user, role } = useAuth();
   const queryClient = useQueryClient();
-  const [match, setMatch] = useState<Match | null>(null);
+  const [serverMatch, setMatch] = useState<Match | null>(null);
   const [innings, setInnings] = useState<Inn[]>([]);
   const [balls, setBalls] = useState<Ball[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -349,11 +349,19 @@ function LiveScoring() {
   const [inputOvers, setInputOvers] = useState<number>(6);
   const [submittingOvers, setSubmittingOvers] = useState(false);
 
+  // Offline scoring & selection modals states
+  const [offlineInnings, setOfflineInnings] = useState<Inn[]>([]);
+  const [offlineClosedInnings, setOfflineClosedInnings] = useState<string[]>([]);
+  const [offlineMatchUpdates, setOfflineMatchUpdates] = useState<Partial<Match>>({});
+  const [showBowlerSelectModal, setShowBowlerSelectModal] = useState(false);
+  const [showBatterSelectModal, setShowBatterSelectModal] = useState(false);
+  const [selectBatterType, setSelectBatterType] = useState<"striker" | "nonStriker" | null>(null);
+
   useEffect(() => {
-    if (match) {
-      setInputOvers(match.overs);
+    if (serverMatch) {
+      setInputOvers(serverMatch.overs);
     }
-  }, [match?.id, match?.overs]);
+  }, [serverMatch?.id, serverMatch?.overs]);
 
   const handleSaveOvers = async () => {
     if (inputOvers < 1 || inputOvers > 50) {
@@ -379,7 +387,7 @@ function LiveScoring() {
   const [showAllOvers, setShowAllOvers] = useState(false);
   const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
 
-  const canScore = role === "admin" || (user && match && match.created_by === user.id);
+  const canScore = role === "admin" || (user && serverMatch && serverMatch.created_by === user.id);
   const playerName = (pid: string) => players.find((p) => p.id === pid)?.name ?? "—";
 
   const [isLiveSync, setIsLiveSync] = useState(false);
@@ -414,6 +422,27 @@ function LiveScoring() {
         console.error("Failed to parse saved undo states", e);
       }
     }
+
+    const savedOfflineInnings = localStorage.getItem(`criclab_offline_innings_${id}`);
+    if (savedOfflineInnings) {
+      try {
+        setOfflineInnings(JSON.parse(savedOfflineInnings));
+      } catch (e) {}
+    }
+
+    const savedOfflineClosed = localStorage.getItem(`criclab_offline_closed_innings_${id}`);
+    if (savedOfflineClosed) {
+      try {
+        setOfflineClosedInnings(JSON.parse(savedOfflineClosed));
+      } catch (e) {}
+    }
+
+    const savedOfflineMatch = localStorage.getItem(`criclab_offline_match_updates_${id}`);
+    if (savedOfflineMatch) {
+      try {
+        setOfflineMatchUpdates(JSON.parse(savedOfflineMatch));
+      } catch (e) {}
+    }
   }, [id]);
 
   useEffect(() => {
@@ -431,6 +460,24 @@ function LiveScoring() {
       localStorage.removeItem(`criclab_undo_states_${id}`);
     }
   }, [undoStates, id]);
+
+  const markInningsClosedOffline = (inningsId: string) => {
+    const updated = [...offlineClosedInnings, inningsId];
+    setOfflineClosedInnings(updated);
+    localStorage.setItem(`criclab_offline_closed_innings_${id}`, JSON.stringify(updated));
+  };
+
+  const addInningsOffline = (newInn: any) => {
+    const updated = [...offlineInnings, newInn];
+    setOfflineInnings(updated);
+    localStorage.setItem(`criclab_offline_innings_${id}`, JSON.stringify(updated));
+  };
+
+  const updateOfflineMatch = (updates: any) => {
+    const updated = { ...offlineMatchUpdates, ...updates };
+    setOfflineMatchUpdates(updated);
+    localStorage.setItem(`criclab_offline_match_updates_${id}`, JSON.stringify(updated));
+  };
 
 
 
@@ -653,21 +700,41 @@ function LiveScoring() {
   }, [balls, localEvents, undoneBallIds, editedBalls]);
 
 
+  const match = useMemo(() => {
+    if (!serverMatch) return null;
+    return {
+      ...serverMatch,
+      ...offlineMatchUpdates,
+    };
+  }, [serverMatch, offlineMatchUpdates]);
+
+  const combinedInnings = useMemo(() => {
+    const list = [...innings];
+    offlineInnings.forEach((oi) => {
+      if (!list.some((i) => i.id === oi.id || i.innings_no === oi.innings_no)) {
+        list.push(oi);
+      }
+    });
+    return list;
+  }, [innings, offlineInnings]);
+
   // 6. Calculate optimistic Innings state
   const optimisticInnings = useMemo(() => {
-    return innings.map((inn) => {
+    return combinedInnings.map((inn) => {
       const innEvents = combinedBalls.filter((b) => b.innings_id === inn.id);
       const runs = innEvents.reduce((sum, b) => sum + (b.runs ?? 0) + (b.extra_runs ?? 0), 0);
       const wickets = innEvents.filter((b) => b.is_wicket).length;
       const legal_balls = innEvents.filter((b) => b.is_legal).length;
+      const is_closed = inn.is_closed || offlineClosedInnings.includes(inn.id);
       return {
         ...inn,
         runs,
         wickets,
         legal_balls,
+        is_closed,
       };
     });
-  }, [innings, combinedBalls]);
+  }, [combinedInnings, combinedBalls, offlineClosedInnings]);
 
   const currentInn = useMemo(
     () =>
@@ -1242,7 +1309,74 @@ function LiveScoring() {
       disabled[striker] = "Striker";
     }
     return disabled;
-  }, [striker]);
+  }, [striker]);  const handleSelectBowler = (bowlerId: string) => {
+    setBowler(bowlerId);
+    setShowBowlerSelectModal(false);
+    toast.success(`Bowler set to ${playerName(bowlerId)}`);
+  };
+
+  const handleSelectBatter = (playerId: string) => {
+    if (selectBatterType === "striker") {
+      setStriker(playerId);
+    } else {
+      setNonStriker(playerId);
+    }
+    setShowBatterSelectModal(false);
+    setSelectBatterType(null);
+    toast.success(`Batsman set to ${playerName(playerId)}`);
+  };
+
+  useEffect(() => {
+    if (loading || !canScore || !currentInn || currentInn.is_closed) return;
+    if (match?.status === "past") return;
+
+    const maxWickets = battingPlayers.length > 0
+      ? match.last_man_batting
+        ? battingPlayers.length
+        : battingPlayers.length - 1
+      : 10;
+    const legalCount = currentInn.legal_balls ?? 0;
+    const isClosed = legalCount >= match.overs * 6 || currentInn.wickets >= maxWickets || currentInn.wickets >= 10;
+    if (isClosed) return;
+
+    // Prioritize batter selection
+    if (yetToBatPlayers.length > 0) {
+      if (!striker && !showBatterSelectModal) {
+        setSelectBatterType("striker");
+        setShowBatterSelectModal(true);
+        return;
+      }
+      if (!nonStriker && !isSoloPlay && !isLastManActive && !showBatterSelectModal) {
+        setSelectBatterType("nonStriker");
+        setShowBatterSelectModal(true);
+        return;
+      }
+    }
+
+    // Then bowler selection
+    if (!bowler && !showBowlerSelectModal) {
+      setShowBowlerSelectModal(true);
+    }
+  }, [
+    loading,
+    canScore,
+    currentInn?.id,
+    currentInn?.is_closed,
+    currentInn?.legal_balls,
+    currentInn?.wickets,
+    match?.status,
+    match?.overs,
+    match?.last_man_batting,
+    striker,
+    nonStriker,
+    isSoloPlay,
+    isLastManActive,
+    yetToBatPlayers.length,
+    bowler,
+    showBowlerSelectModal,
+    showBatterSelectModal,
+    battingPlayers.length,
+  ]);
 
   const swapStrike = () => {
     if (isSoloPlay || isLastManActive) {
@@ -1262,7 +1396,32 @@ function LiveScoring() {
   const startInnings = async (battingTeamId: string) => {
     if (!match) return;
     const bowlingTeamId = battingTeamId === match.team_a_id ? match.team_b_id : match.team_a_id;
-    const innNo = (innings[innings.length - 1]?.innings_no ?? 0) + 1;
+    const innNo = (combinedInnings[combinedInnings.length - 1]?.innings_no ?? 0) + 1;
+
+    // Generate local offline innings representation
+    const localInnId = `local_inn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const newLocalInn = {
+      id: localInnId,
+      match_id: id,
+      innings_no: innNo,
+      batting_team_id: battingTeamId,
+      bowling_team_id: bowlingTeamId,
+      runs: 0,
+      wickets: 0,
+      legal_balls: 0,
+      is_closed: false,
+    };
+
+    // Close current innings if it's open
+    if (currentInn && !currentInn.is_closed) {
+      try {
+        await inningsService.closeInnings(currentInn.id);
+      } catch (e) {
+        console.warn("Failed to close innings on server in startInnings, falling back offline:", e);
+        markInningsClosedOffline(currentInn.id);
+      }
+    }
+
     try {
       await inningsService.startInnings(id, {
         batting_team_id: battingTeamId,
@@ -1271,7 +1430,13 @@ function LiveScoring() {
       });
       reload();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message);
+      // Offline fallback
+      addInningsOffline(newLocalInn);
+      updateOfflineMatch({
+        status: "live",
+        current_innings: innNo,
+      });
+      toast.success(`Innings ${innNo} started offline!`);
     }
   };
 
@@ -1405,8 +1570,8 @@ function LiveScoring() {
   };
 
   const isSecondInningsCompleted = useMemo(() => {
-    return !!(currentInn && currentInn.innings_no === 2 && isInningsOver);
-  }, [currentInn, isInningsOver]);
+    return !!(canScore && currentInn && currentInn.innings_no === 2 && isInningsOver);
+  }, [canScore, currentInn, isInningsOver]);
 
   useEffect(() => {
     if (isSecondInningsCompleted && !matchEndedAuto && !winnerCelebration && match && !match.is_closed) {
@@ -1419,8 +1584,8 @@ function LiveScoring() {
   }, [isSecondInningsCompleted, matchEndedAuto, winnerCelebration, match]);
 
   const isFirstInningsCompleted = useMemo(() => {
-    return !!(currentInn && currentInn.innings_no === 1 && isInningsOver && !currentInn.is_closed);
-  }, [currentInn, isInningsOver]);
+    return !!(canScore && currentInn && currentInn.innings_no === 1 && isInningsOver && !currentInn.is_closed);
+  }, [canScore, currentInn, isInningsOver]);
 
   useEffect(() => {
     if (isFirstInningsCompleted && !firstInnEndedAuto) {
@@ -1433,8 +1598,11 @@ function LiveScoring() {
             reload();
           }
         } catch (err: any) {
-          toast.error(err.response?.data?.message || err.message);
-          setFirstInnEndedAuto(false);
+          console.warn("Failed to close innings on server, falling back offline:", err);
+          if (currentInn) {
+            markInningsClosedOffline(currentInn.id);
+            toast.success("First innings completed offline!");
+          }
         }
       }, 800);
       return () => clearTimeout(timer);
@@ -2647,18 +2815,47 @@ function LiveScoring() {
               <div className="flex flex-col items-end text-[11px] text-muted-foreground font-bold tracking-tight">
                 <div>
                   Striker:{" "}
-                  <span className="text-primary font-extrabold">
+                  <span
+                    onClick={() => {
+                      if (canScore && !isLocked) {
+                        setSelectBatterType("striker");
+                        setShowBatterSelectModal(true);
+                      }
+                    }}
+                    className={`text-primary font-extrabold ${canScore && !isLocked ? "cursor-pointer hover:underline" : ""}`}
+                  >
                     {playerName(striker) || "—"}*
                   </span>
                 </div>
                 {!isSoloPlay && nonStriker && (
                   <div>
                     Non-Striker:{" "}
-                    <span className="text-foreground/80 font-semibold">
+                    <span
+                      onClick={() => {
+                        if (canScore && !isLocked && !isLastManRemaining) {
+                          setSelectBatterType("nonStriker");
+                          setShowBatterSelectModal(true);
+                        }
+                      }}
+                      className={`text-foreground/80 font-semibold ${canScore && !isLocked && !isLastManRemaining ? "cursor-pointer hover:underline" : ""}`}
+                    >
                       {playerName(nonStriker) || "—"}
                     </span>
                   </div>
                 )}
+                <div>
+                  Bowler:{" "}
+                  <span
+                    onClick={() => {
+                      if (canScore && !isOverStarted && !isLocked) {
+                        setShowBowlerSelectModal(true);
+                      }
+                    }}
+                    className={`text-emerald-400 font-extrabold ${canScore && !isOverStarted && !isLocked ? "cursor-pointer hover:underline" : ""}`}
+                  >
+                    {playerName(bowler) || "—"}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -3688,6 +3885,142 @@ function LiveScoring() {
           </Dialog>
         </>
       )}
+      {/* Bowler Selection Modal */}
+      <Dialog 
+        open={showBowlerSelectModal} 
+        onOpenChange={(open) => {
+          if (bowler || !open) {
+            setShowBowlerSelectModal(open);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md bg-card border border-border/40 text-foreground p-6 rounded-2xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-primary to-teal-500" />
+          
+          <DialogHeader className="pb-2">
+            <DialogTitle className="text-lg font-black text-primary uppercase tracking-widest flex items-center gap-1.5 leading-none">
+              Select Bowler
+            </DialogTitle>
+            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mt-1">
+              Select the bowler for the next over
+            </p>
+          </DialogHeader>
+
+          <div className="space-y-3 my-4 flex-1 overflow-y-auto pr-1">
+            {bowlingPlayers.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic text-center py-4">No players available in bowling team</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2">
+                {bowlingPlayers.map((p) => {
+                  const disableReason = disabledBowlers[p.id];
+                  const isDisabled = !!disableReason;
+                  return (
+                    <button
+                      type="button"
+                      key={p.id}
+                      disabled={isDisabled}
+                      onClick={() => handleSelectBowler(p.id)}
+                      className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${
+                        isDisabled
+                          ? "bg-muted/40 border-border/25 opacity-55 cursor-not-allowed"
+                          : "bg-muted/10 border-border/30 hover:bg-primary/5 hover:border-primary/50 cursor-pointer active:scale-[0.99]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-xs ${
+                          isDisabled ? "bg-muted text-muted-foreground" : "bg-emerald-500/10 text-emerald-400"
+                        }`}>
+                          {p.name.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-foreground">{p.name}</p>
+                          <p className="text-[9px] text-muted-foreground font-medium uppercase tracking-wider">{p.role || "Bowler"}</p>
+                        </div>
+                      </div>
+                      {isDisabled && (
+                        <span className="text-[9px] bg-destructive/15 text-destructive px-2 py-0.5 rounded-md font-extrabold uppercase tracking-wide">
+                          {disableReason}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Batter Selection Modal */}
+      <Dialog 
+        open={showBatterSelectModal} 
+        onOpenChange={(open) => {
+          const currentVal = selectBatterType === "striker" ? striker : nonStriker;
+          if (currentVal || !open) {
+            setShowBatterSelectModal(open);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md bg-card border border-border/40 text-foreground p-6 rounded-2xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-primary to-indigo-500" />
+          
+          <DialogHeader className="pb-2">
+            <DialogTitle className="text-lg font-black text-primary uppercase tracking-widest flex items-center gap-1.5 leading-none">
+              Select {selectBatterType === "striker" ? "Striker" : "Non-Striker"}
+            </DialogTitle>
+            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mt-1">
+              Choose the next batsman to take the crease
+            </p>
+          </DialogHeader>
+
+          <div className="space-y-3 my-4 flex-1 overflow-y-auto pr-1">
+            {yetToBatPlayers.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic text-center py-4">No batsman available in yet-to-bat list</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2">
+                {yetToBatPlayers.map((p) => {
+                  const isStrikerDisabled = selectBatterType === "striker" && p.id === nonStriker;
+                  const isNonStrikerDisabled = selectBatterType === "nonStriker" && p.id === striker;
+                  const isDisabled = isStrikerDisabled || isNonStrikerDisabled;
+                  const disableReason = isStrikerDisabled ? "Non-striker" : isNonStrikerDisabled ? "Striker" : "";
+                  
+                  return (
+                    <button
+                      type="button"
+                      key={p.id}
+                      disabled={isDisabled}
+                      onClick={() => handleSelectBatter(p.id)}
+                      className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all ${
+                        isDisabled
+                          ? "bg-muted/40 border-border/25 opacity-55 cursor-not-allowed"
+                          : "bg-muted/10 border-border/30 hover:bg-primary/5 hover:border-primary/50 cursor-pointer active:scale-[0.99]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-xs ${
+                          isDisabled ? "bg-muted text-muted-foreground" : "bg-blue-500/10 text-blue-400"
+                        }`}>
+                          {p.name.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-foreground">{p.name}</p>
+                          <p className="text-[9px] text-muted-foreground font-medium uppercase tracking-wider">{p.role || "Batsman"}</p>
+                        </div>
+                      </div>
+                      {isDisabled && (
+                        <span className="text-[9px] bg-destructive/15 text-destructive px-2 py-0.5 rounded-md font-extrabold uppercase tracking-wide">
+                          {disableReason}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {winnerCelebration && (
         <WinnerCelebrationOverlay
           winnerTeamName={winnerCelebration.winnerTeamName}
