@@ -49,38 +49,103 @@ class MatchController extends Controller
         $innings = $match->innings()->orderBy('innings_no')->get();
         $balls = $match->balls()->orderBy('ball_index')->get();
 
-        // Retrieve player IDs referenced in match balls (in case they were removed/moved from teams)
+        $squadA = $match->squad_a_ids ?? [];
+        $squadB = $match->squad_b_ids ?? [];
+
         $referencedPlayerIds = $balls->flatMap(function ($b) {
             return [$b->batter_id, $b->non_striker_id, $b->bowler_id, $b->caught_by_id];
         })->filter()->unique()->all();
 
+        if ($match->status === 'live' || $match->status === 'upcoming' || (empty($squadA) && empty($squadB))) {
+            $currentTeamAPlayerIds = Player::where('team_id', $match->team_a_id)->pluck('id')->toArray();
+            $currentTeamBPlayerIds = Player::where('team_id', $match->team_b_id)->pluck('id')->toArray();
+
+            $squadA = array_values(array_unique(array_merge($squadA, $currentTeamAPlayerIds)));
+            $squadB = array_values(array_unique(array_merge($squadB, $currentTeamBPlayerIds)));
+
+            if ($match->status === 'live' || $match->status === 'upcoming') {
+                $squadA = array_filter($squadA, function ($playerId) use ($currentTeamAPlayerIds, $referencedPlayerIds, $balls, $innings, $match) {
+                    if (in_array($playerId, $currentTeamAPlayerIds)) return true;
+                    if (!in_array($playerId, $referencedPlayerIds)) return false;
+                    foreach ($balls as $b) {
+                        if ($b->batter_id === $playerId || $b->non_striker_id === $playerId) {
+                            $inn = $innings->firstWhere('id', $b->innings_id);
+                            if ($inn && $inn->batting_team_id === $match->team_a_id) return true;
+                        }
+                        if ($b->bowler_id === $playerId || $b->caught_by_id === $playerId) {
+                            $inn = $innings->firstWhere('id', $b->innings_id);
+                            if ($inn && $inn->bowling_team_id === $match->team_a_id) return true;
+                        }
+                    }
+                    return false;
+                });
+
+                $squadB = array_filter($squadB, function ($playerId) use ($currentTeamBPlayerIds, $referencedPlayerIds, $balls, $innings, $match) {
+                    if (in_array($playerId, $currentTeamBPlayerIds)) return true;
+                    if (!in_array($playerId, $referencedPlayerIds)) return false;
+                    foreach ($balls as $b) {
+                        if ($b->batter_id === $playerId || $b->non_striker_id === $playerId) {
+                            $inn = $innings->firstWhere('id', $b->innings_id);
+                            if ($inn && $inn->batting_team_id === $match->team_b_id) return true;
+                        }
+                        if ($b->bowler_id === $playerId || $b->caught_by_id === $playerId) {
+                            $inn = $innings->firstWhere('id', $b->innings_id);
+                            if ($inn && $inn->bowling_team_id === $match->team_b_id) return true;
+                        }
+                    }
+                    return false;
+                });
+            }
+        }
+
+        // Add any player referenced in balls who isn't already in squads
+        foreach ($referencedPlayerIds as $playerId) {
+            if (in_array($playerId, $squadA) || in_array($playerId, $squadB)) {
+                continue;
+            }
+            $teamId = null;
+            foreach ($balls as $b) {
+                if ($b->batter_id === $playerId || $b->non_striker_id === $playerId) {
+                    $inn = $innings->firstWhere('id', $b->innings_id);
+                    if ($inn) {
+                        $teamId = $inn->batting_team_id;
+                        break;
+                    }
+                }
+                if ($b->bowler_id === $playerId || $b->caught_by_id === $playerId) {
+                    $inn = $innings->firstWhere('id', $b->innings_id);
+                    if ($inn) {
+                        $teamId = $inn->bowling_team_id;
+                        break;
+                    }
+                }
+            }
+            if ($teamId === $match->team_a_id) {
+                $squadA[] = $playerId;
+            } elseif ($teamId === $match->team_b_id) {
+                $squadB[] = $playerId;
+            }
+        }
+
+        $squadA = array_values(array_unique($squadA));
+        $squadB = array_values(array_unique($squadB));
+
+        if ($match->squad_a_ids !== $squadA || $match->squad_b_ids !== $squadB) {
+            $match->squad_a_ids = $squadA;
+            $match->squad_b_ids = $squadB;
+            $match->save();
+        }
+
+        $allSquadIds = array_unique(array_merge($squadA, $squadB));
         $players = Player::withTrashed()
-            ->whereIn('team_id', [$match->team_a_id, $match->team_b_id])
-            ->orWhereIn('id', $referencedPlayerIds)
+            ->whereIn('id', $allSquadIds)
             ->get();
 
-        // If a player was fetched via referencedPlayerIds but their current team_id in database is different,
-        // map it to the team they played for in this match so the frontend filters them correctly.
-        $players = $players->map(function ($player) use ($balls, $innings, $match) {
-            if (in_array($player->team_id, [$match->team_a_id, $match->team_b_id])) {
-                return $player;
-            }
-
-            foreach ($balls as $b) {
-                if ($b->batter_id === $player->id || $b->non_striker_id === $player->id) {
-                    $inn = $innings->firstWhere('id', $b->innings_id);
-                    if ($inn) {
-                        $player->team_id = $inn->batting_team_id;
-                        break;
-                    }
-                }
-                if ($b->bowler_id === $player->id) {
-                    $inn = $innings->firstWhere('id', $b->innings_id);
-                    if ($inn) {
-                        $player->team_id = $inn->bowling_team_id;
-                        break;
-                    }
-                }
+        $players = $players->map(function ($player) use ($squadA, $squadB, $match) {
+            if (in_array($player->id, $squadA)) {
+                $player->team_id = $match->team_a_id;
+            } elseif (in_array($player->id, $squadB)) {
+                $player->team_id = $match->team_b_id;
             }
             return $player;
         });
@@ -285,6 +350,25 @@ class MatchController extends Controller
             if ($match->man_of_the_match_id === $oldPlayerId) {
                 $match->update(['man_of_the_match_id' => $newPlayerId]);
             }
+
+            // Update squad lists
+            $squadA = $match->squad_a_ids ?? [];
+            $squadB = $match->squad_b_ids ?? [];
+
+            if (in_array($oldPlayerId, $squadA)) {
+                $squadA = array_values(array_unique(array_map(function ($id) use ($oldPlayerId, $newPlayerId) {
+                    return $id === $oldPlayerId ? $newPlayerId : $id;
+                }, $squadA)));
+            }
+            if (in_array($oldPlayerId, $squadB)) {
+                $squadB = array_values(array_unique(array_map(function ($id) use ($oldPlayerId, $newPlayerId) {
+                    return $id === $oldPlayerId ? $newPlayerId : $id;
+                }, $squadB)));
+            }
+
+            $match->squad_a_ids = $squadA;
+            $match->squad_b_ids = $squadB;
+            $match->save();
 
             // Recalculate catches count
             $matchCatchesCount = \Illuminate\Support\Facades\DB::table('balls')

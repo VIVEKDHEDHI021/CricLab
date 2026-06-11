@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
     'team_a_id', 'team_b_id', 'overs', 'wide_run', 'noball_run',
     'match_type', 'ground', 'match_date', 'status', 'result',
     'batting_first_id', 'current_innings', 'created_by', 'last_man_batting',
-    'man_of_the_match_id'
+    'man_of_the_match_id', 'squad_a_ids', 'squad_b_ids'
 ])]
 class CricketMatch extends Model
 {
@@ -20,6 +20,8 @@ class CricketMatch extends Model
 
     protected $casts = [
         'last_man_batting' => 'boolean',
+        'squad_a_ids' => 'array',
+        'squad_b_ids' => 'array',
     ];
 
     public function teamA()
