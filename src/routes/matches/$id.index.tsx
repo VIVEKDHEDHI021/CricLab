@@ -69,6 +69,18 @@ function MatchDetails() {
   const [inputOvers, setInputOvers] = useState<number>(6);
   const [submittingOvers, setSubmittingOvers] = useState(false);
 
+  // Replace player states
+  const [isReplaceModalOpen, setIsReplaceModalOpen] = useState(false);
+  const [replaceOldPlayerId, setReplaceOldPlayerId] = useState("");
+  const [replaceOldPlayerName, setReplaceOldPlayerName] = useState("");
+  const [replaceTargetTeamId, setReplaceTargetTeamId] = useState("");
+  const [replaceMode, setReplaceMode] = useState<"existing" | "new">("existing");
+  const [replaceNewPlayerName, setReplaceNewPlayerName] = useState("");
+  const [replaceNewPlayerMobile, setReplaceNewPlayerMobile] = useState("");
+  const [selectedReplacementPlayerId, setSelectedReplacementPlayerId] = useState("");
+  const [submittingReplace, setSubmittingReplace] = useState(false);
+  const [replaceSearchQuery, setReplaceSearchQuery] = useState("");
+
   const handleSaveOvers = async (e: React.FormEvent) => {
     e.preventDefault();
     if (inputOvers < 1 || inputOvers > 50) {
@@ -331,6 +343,69 @@ function MatchDetails() {
 
   const teamAPlayers = (players ?? []).filter((p: any) => p.team_id === m.team_a_id);
   const teamBPlayers = (players ?? []).filter((p: any) => p.team_id === m.team_b_id);
+
+  const openReplacePlayerModal = (playerId: string, playerName: string, teamId: string) => {
+    setReplaceOldPlayerId(playerId);
+    setReplaceOldPlayerName(playerName);
+    setReplaceTargetTeamId(teamId);
+    setReplaceMode("existing");
+    setReplaceNewPlayerName("");
+    setReplaceNewPlayerMobile("");
+    setSelectedReplacementPlayerId("");
+    setReplaceSearchQuery("");
+    setIsReplaceModalOpen(true);
+  };
+
+  const handleReplacePlayerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmittingReplace(true);
+
+    try {
+      let finalNewPlayerId = selectedReplacementPlayerId;
+
+      if (replaceMode === "new") {
+        if (!replaceNewPlayerName.trim()) {
+          toast.error("Player name is required");
+          setSubmittingReplace(false);
+          return;
+        }
+        const newPlayer = await playerService.createPlayer({
+          name: replaceNewPlayerName.trim(),
+          team_id: replaceTargetTeamId,
+          mobile: replaceNewPlayerMobile.trim() || undefined,
+        });
+        finalNewPlayerId = newPlayer.id;
+      }
+
+      if (!finalNewPlayerId) {
+        toast.error("Please select or create a replacement player");
+        setSubmittingReplace(false);
+        return;
+      }
+
+      await matchService.replacePlayer(id, replaceOldPlayerId, finalNewPlayerId);
+      toast.success(`Successfully replaced ${replaceOldPlayerName}!`);
+      setIsReplaceModalOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["match", id] });
+      loadAppPlayers();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Failed to replace player");
+    } finally {
+      setSubmittingReplace(false);
+    }
+  };
+
+  const filteredReplacementPlayers = useMemo(() => {
+    if (!allAppPlayers || !players) return [];
+    return allAppPlayers.filter((p) => {
+      const isCurrentPlayer = p.id === replaceOldPlayerId;
+      const isAlreadyInTeamA = teamAPlayers.some((tp: any) => tp.id === p.id);
+      const isAlreadyInTeamB = teamBPlayers.some((tp: any) => tp.id === p.id);
+      const matchesSearch = p.name.toLowerCase().includes(replaceSearchQuery.toLowerCase()) || 
+                            (p.mobile && p.mobile.includes(replaceSearchQuery));
+      return !isCurrentPlayer && !isAlreadyInTeamA && !isAlreadyInTeamB && matchesSearch;
+    });
+  }, [allAppPlayers, players, replaceOldPlayerId, replaceSearchQuery, teamAPlayers, teamBPlayers]);
 
   // Recommendations calculation
   const filteredRecommendations = allAppPlayers.filter(p => {
@@ -993,15 +1068,26 @@ function MatchDetails() {
                     <span className="text-[10px] text-muted-foreground uppercase">{p.role || "Player"}</span>
                   </div>
                   {(canManage || (user && m.created_by === user.id)) && (
-                    <Button 
-                      size="icon" 
-                      variant="ghost" 
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0 rounded-full" 
-                      onClick={() => handleRemovePlayer(p.id, p.name)}
-                      title="Remove player from squad"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-primary shrink-0 rounded-full"
+                        onClick={() => openReplacePlayerModal(p.id, p.name, m.team_a_id)}
+                        title="Replace player in match"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0 rounded-full" 
+                        onClick={() => handleRemovePlayer(p.id, p.name)}
+                        title="Remove player from squad"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   )}
                 </div>
               ))}
@@ -1029,15 +1115,26 @@ function MatchDetails() {
                     <span className="text-[10px] text-muted-foreground uppercase">{p.role || "Player"}</span>
                   </div>
                   {(canManage || (user && m.created_by === user.id)) && (
-                    <Button 
-                      size="icon" 
-                      variant="ghost" 
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0 rounded-full" 
-                      onClick={() => handleRemovePlayer(p.id, p.name)}
-                      title="Remove player from squad"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-primary shrink-0 rounded-full"
+                        onClick={() => openReplacePlayerModal(p.id, p.name, m.team_b_id)}
+                        title="Replace player in match"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0 rounded-full" 
+                        onClick={() => handleRemovePlayer(p.id, p.name)}
+                        title="Remove player from squad"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   )}
                 </div>
               ))}
@@ -1662,6 +1759,117 @@ function MatchDetails() {
               </>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Replace Player Dialog Modal */}
+      <Dialog open={isReplaceModalOpen} onOpenChange={setIsReplaceModalOpen}>
+        <DialogContent className="max-w-md bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-extrabold flex items-center gap-2">
+              <RefreshCw className="h-5 w-5 text-primary" />
+              Replace Player in Match
+            </DialogTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Replace all references to <strong className="text-foreground">{replaceOldPlayerName}</strong> (as batter, bowler, or fielder) with the correct player profile.
+            </p>
+          </DialogHeader>
+
+          {/* Mode Selector Tabs */}
+          <div className="flex border border-border/60 my-3 bg-muted/40 p-1 rounded-xl">
+            <button
+              type="button"
+              className={`flex-1 py-1.5 text-xs font-bold uppercase rounded-lg transition-all ${
+                replaceMode === "existing"
+                  ? "bg-background text-primary shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => setReplaceMode("existing")}
+            >
+              Existing Profile
+            </button>
+            <button
+              type="button"
+              className={`flex-1 py-1.5 text-xs font-bold uppercase rounded-lg transition-all ${
+                replaceMode === "new"
+                  ? "bg-background text-primary shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={() => setReplaceMode("new")}
+            >
+              New Profile
+            </button>
+          </div>
+
+          <form onSubmit={handleReplacePlayerSubmit} className="space-y-4 pt-2">
+            {replaceMode === "existing" ? (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="replace-search">Search Player</Label>
+                  <Input
+                    id="replace-search"
+                    placeholder="Type name or mobile..."
+                    value={replaceSearchQuery}
+                    onChange={(e) => setReplaceSearchQuery(e.target.value)}
+                    className="bg-background border-border"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="replacement-player">Select Profile</Label>
+                  <select
+                    id="replacement-player"
+                    value={selectedReplacementPlayerId}
+                    onChange={(e) => setSelectedReplacementPlayerId(e.target.value)}
+                    className="w-full h-10 px-3 py-2 text-xs border border-border bg-background rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    required
+                  >
+                    <option value="">-- Choose Replacement --</option>
+                    {filteredReplacementPlayers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} {p.mobile ? `(${p.mobile})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 animate-in fade-in duration-200">
+                <div className="space-y-1.5">
+                  <Label htmlFor="new-replace-name">Player Name</Label>
+                  <Input
+                    id="new-replace-name"
+                    placeholder="Enter full name"
+                    value={replaceNewPlayerName}
+                    onChange={(e) => setReplaceNewPlayerName(e.target.value)}
+                    className="bg-background border-border"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="new-replace-mobile">Mobile Number (Optional)</Label>
+                  <Input
+                    id="new-replace-mobile"
+                    type="tel"
+                    placeholder="Enter mobile"
+                    value={replaceNewPlayerMobile}
+                    onChange={(e) => setReplaceNewPlayerMobile(e.target.value)}
+                    className="bg-background border-border"
+                  />
+                </div>
+              </div>
+            )}
+
+            <DialogFooter className="pt-2 flex gap-2">
+              <Button type="button" variant="outline" className="text-xs h-9 font-semibold" onClick={() => setIsReplaceModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submittingReplace} className="text-xs h-9 font-bold">
+                {submittingReplace ? "Processing..." : "Confirm Replacement"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

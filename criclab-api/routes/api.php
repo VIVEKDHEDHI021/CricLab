@@ -71,6 +71,7 @@ Route::middleware(['auth:sanctum', 'force_password_change'])->group(function () 
         Route::put('/balls/{id}', [BallController::class, 'update']);
         Route::patch('/matches/{id}/end', [MatchController::class, 'end']);
         Route::put('/matches/{id}', [MatchController::class, 'update']);
+        Route::post('/matches/{id}/replace-player', [MatchController::class, 'replacePlayer']);
     });
 
     // Friend connections

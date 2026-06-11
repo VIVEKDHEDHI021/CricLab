@@ -235,4 +235,89 @@ class MatchController extends Controller
 
         return response()->json($match);
     }
+
+    public function replacePlayer(Request $request, $id)
+    {
+        $match = CricketMatch::findOrFail($id);
+
+        if (!in_array($request->user()->role, ['admin', 'scorer']) && $match->created_by !== $request->user()->id) {
+            return response()->json(['message' => 'You are not authorized to score this match.'], 403);
+        }
+
+        $request->validate([
+            'old_player_id' => 'required|uuid|exists:players,id',
+            'new_player_id' => 'required|uuid|exists:players,id',
+        ]);
+
+        $oldPlayerId = $request->old_player_id;
+        $newPlayerId = $request->new_player_id;
+
+        if ($oldPlayerId === $newPlayerId) {
+            return response()->json(['message' => 'The replacement player must be different.'], 422);
+        }
+
+        $oldPlayer = Player::find($oldPlayerId);
+        $newPlayer = Player::find($newPlayerId);
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($match, $oldPlayerId, $newPlayerId, $oldPlayer, $newPlayer) {
+            // Update balls
+            \Illuminate\Support\Facades\DB::table('balls')
+                ->where('match_id', $match->id)
+                ->where('batter_id', $oldPlayerId)
+                ->update(['batter_id' => $newPlayerId]);
+
+            \Illuminate\Support\Facades\DB::table('balls')
+                ->where('match_id', $match->id)
+                ->where('non_striker_id', $oldPlayerId)
+                ->update(['non_striker_id' => $newPlayerId]);
+
+            \Illuminate\Support\Facades\DB::table('balls')
+                ->where('match_id', $match->id)
+                ->where('bowler_id', $oldPlayerId)
+                ->update(['bowler_id' => $newPlayerId]);
+
+            \Illuminate\Support\Facades\DB::table('balls')
+                ->where('match_id', $match->id)
+                ->where('caught_by_id', $oldPlayerId)
+                ->update(['caught_by_id' => $newPlayerId]);
+
+            // Update Man of the Match
+            if ($match->man_of_the_match_id === $oldPlayerId) {
+                $match->update(['man_of_the_match_id' => $newPlayerId]);
+            }
+
+            // Recalculate catches count
+            $matchCatchesCount = \Illuminate\Support\Facades\DB::table('balls')
+                ->where('match_id', $match->id)
+                ->where('is_wicket', true)
+                ->where('wicket_type', 'caught')
+                ->where('caught_by_id', $newPlayerId)
+                ->count();
+
+            if ($matchCatchesCount > 0) {
+                if ($oldPlayer) {
+                    $oldPlayer->update([
+                        'catches' => max(0, $oldPlayer->catches - $matchCatchesCount)
+                    ]);
+                }
+                if ($newPlayer) {
+                    $newPlayer->update([
+                        'catches' => $newPlayer->catches + $matchCatchesCount
+                    ]);
+                }
+            }
+
+            // Move team/squad membership
+            if ($oldPlayer && $newPlayer) {
+                $targetTeamId = $oldPlayer->team_id;
+                if ($targetTeamId === $match->team_a_id || $targetTeamId === $match->team_b_id) {
+                    $newPlayer->update(['team_id' => $targetTeamId]);
+                }
+            }
+        });
+
+        \App\Events\MatchUpdated::dispatchSafe($match);
+
+        return response()->json(['message' => 'Player replaced successfully.']);
+    }
 }

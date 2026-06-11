@@ -65,4 +65,16 @@ export const matchService = {
     const { data } = await api.put<any>(`/matches/${id}`, matchData);
     return data;
   },
+
+  async replacePlayer(
+    matchId: string,
+    oldPlayerId: string,
+    newPlayerId: string
+  ): Promise<any> {
+    const { data } = await api.post<any>(`/matches/${matchId}/replace-player`, {
+      old_player_id: oldPlayerId,
+      new_player_id: newPlayerId,
+    });
+    return data;
+  },
 };
