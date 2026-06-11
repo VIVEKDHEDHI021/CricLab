@@ -338,11 +338,30 @@ function MatchDetails() {
     }
   }, [data, selectedOversInningsId]);
 
+  const teamAPlayers = useMemo(() => {
+    if (!players || !m) return [];
+    return players.filter((p: any) => p.team_id === m.team_a_id);
+  }, [players, m?.team_a_id]);
+
+  const teamBPlayers = useMemo(() => {
+    if (!players || !m) return [];
+    return players.filter((p: any) => p.team_id === m.team_b_id);
+  }, [players, m?.team_b_id]);
+
+  const filteredReplacementPlayers = useMemo(() => {
+    if (!allAppPlayers || !players) return [];
+    return allAppPlayers.filter((p) => {
+      const isCurrentPlayer = p.id === replaceOldPlayerId;
+      const isAlreadyInTeamA = teamAPlayers.some((tp: any) => tp.id === p.id);
+      const isAlreadyInTeamB = teamBPlayers.some((tp: any) => tp.id === p.id);
+      const matchesSearch = p.name.toLowerCase().includes(replaceSearchQuery.toLowerCase()) || 
+                            (p.mobile && p.mobile.includes(replaceSearchQuery));
+      return !isCurrentPlayer && !isAlreadyInTeamA && !isAlreadyInTeamB && matchesSearch;
+    });
+  }, [allAppPlayers, players, replaceOldPlayerId, replaceSearchQuery, teamAPlayers, teamBPlayers]);
+
   if (isLoading || !data) return <AppShell><div className="text-muted-foreground">Loading…</div></AppShell>;
   const teamName = (tid: string) => teams?.find((t: any) => t.id === tid)?.name ?? "—";
-
-  const teamAPlayers = (players ?? []).filter((p: any) => p.team_id === m.team_a_id);
-  const teamBPlayers = (players ?? []).filter((p: any) => p.team_id === m.team_b_id);
 
   const openReplacePlayerModal = (playerId: string, playerName: string, teamId: string) => {
     setReplaceOldPlayerId(playerId);
@@ -394,18 +413,6 @@ function MatchDetails() {
       setSubmittingReplace(false);
     }
   };
-
-  const filteredReplacementPlayers = useMemo(() => {
-    if (!allAppPlayers || !players) return [];
-    return allAppPlayers.filter((p) => {
-      const isCurrentPlayer = p.id === replaceOldPlayerId;
-      const isAlreadyInTeamA = teamAPlayers.some((tp: any) => tp.id === p.id);
-      const isAlreadyInTeamB = teamBPlayers.some((tp: any) => tp.id === p.id);
-      const matchesSearch = p.name.toLowerCase().includes(replaceSearchQuery.toLowerCase()) || 
-                            (p.mobile && p.mobile.includes(replaceSearchQuery));
-      return !isCurrentPlayer && !isAlreadyInTeamA && !isAlreadyInTeamB && matchesSearch;
-    });
-  }, [allAppPlayers, players, replaceOldPlayerId, replaceSearchQuery, teamAPlayers, teamBPlayers]);
 
   // Recommendations calculation
   const filteredRecommendations = allAppPlayers.filter(p => {

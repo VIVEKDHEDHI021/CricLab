@@ -329,6 +329,45 @@ class BallController extends Controller
         return response()->json($ball);
     }
 
+    public function syncOver(Request $request, $matchId)
+    {
+        $request->validate([
+            'innings_no' => 'required|integer',
+            'over_no' => 'required|integer',
+            'bowler_id' => 'required|uuid|exists:players,id',
+            'deliveries' => 'required|array',
+            'deliveries.*.id' => 'required|uuid',
+            'deliveries.*.ball_index' => 'required|integer',
+            'deliveries.*.ball_in_over' => 'required|integer',
+            'deliveries.*.batter_id' => 'required|uuid|exists:players,id',
+            'deliveries.*.non_striker_id' => 'nullable|uuid|exists:players,id',
+            'deliveries.*.runs' => 'required|integer',
+            'deliveries.*.extra_runs' => 'required|integer',
+            'deliveries.*.extra_type' => 'nullable|string',
+            'deliveries.*.is_wicket' => 'required|boolean',
+            'deliveries.*.wicket_type' => 'nullable|string',
+            'deliveries.*.is_legal' => 'required|boolean',
+            'deliveries.*.caught_by_id' => 'nullable|uuid|exists:players,id',
+        ]);
+
+        $match = CricketMatch::findOrFail($matchId);
+        if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
+            return response()->json(['message' => 'You are not authorized to score this match.'], 403);
+        }
+
+        try {
+            $scoringService = new \App\Services\ScoringService();
+            $scoringService->syncOver($matchId, $request->all());
+
+            $updatedMatch = CricketMatch::findOrFail($matchId);
+            \App\Events\MatchUpdated::dispatchSafe($updatedMatch);
+
+            return response()->json(['message' => 'Over synced successfully.']);
+        } catch (\App\Exceptions\ScoringException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+    }
+
     public function destroy(Request $request, $id)
     {
         $ball = Ball::findOrFail($id);
@@ -339,19 +378,39 @@ class BallController extends Controller
             return response()->json(['message' => 'You are not authorized to score this match.'], 403);
         }
 
-        if ($ball->is_wicket && $ball->wicket_type === 'caught' && $ball->caught_by_id) {
-            $catcher = Player::find($ball->caught_by_id);
-            if ($catcher) {
-                $catcher->decrement('catches');
+        \Illuminate\Support\Facades\DB::beginTransaction();
+        try {
+            // Lock innings row
+            $innings = Innings::where('id', $innings->id)->lockForUpdate()->firstOrFail();
+
+            // Validate that only the latest delivery can be undone
+            $lastBall = Ball::where('innings_id', $innings->id)->orderBy('ball_index', 'desc')->first();
+            if ($lastBall && $lastBall->id !== $ball->id) {
+                return response()->json(['message' => 'Only the latest delivery can be undone.'], 422);
             }
+
+            if ($ball->is_wicket && $ball->wicket_type === 'caught' && $ball->caught_by_id) {
+                $catcher = Player::find($ball->caught_by_id);
+                if ($catcher) {
+                    $catcher->decrement('catches');
+                }
+            }
+
+            // Shift ball_index to a negative value to prevent unique key conflicts on sync re-attempts
+            $ball->ball_index = -($ball->ball_index + 1);
+            $ball->save();
+            $ball->delete(); // Soft delete
+
+            self::recalculateInnings($innings->id);
+
+            \Illuminate\Support\Facades\DB::commit();
+
+            \App\Events\MatchUpdated::dispatchSafe($match);
+
+            return response()->json(['message' => 'Ball deleted successfully.']);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\DB::rollBack();
+            return response()->json(['message' => $e->getMessage()], 500);
         }
-
-        $ball->delete();
-
-        self::recalculateInnings($innings->id);
-
-        \App\Events\MatchUpdated::dispatchSafe($match);
-
-        return response()->json(['message' => 'Ball deleted successfully.']);
     }
 }

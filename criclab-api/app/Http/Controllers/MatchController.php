@@ -409,4 +409,34 @@ class MatchController extends Controller
 
         return response()->json(['message' => 'Player replaced successfully.']);
     }
+
+    public function syncStatus(Request $request, $matchId)
+    {
+        $match = CricketMatch::findOrFail($matchId);
+        $innings = \App\Models\Innings::where('match_id', $matchId)->get();
+
+        $syncedOvers = [];
+        foreach ($innings as $inn) {
+            $overs = \App\Models\Ball::where('innings_id', $inn->id)
+                ->where('is_legal', true)
+                ->groupBy('over_number')
+                ->select('over_number', \Illuminate\Support\Facades\DB::raw('count(*) as legal_count'))
+                ->having('legal_count', '>=', 6)
+                ->get()
+                ->map(fn($o) => [
+                    'innings_no' => $inn->innings_no,
+                    'over_no' => $o->over_number
+                ])
+                ->toArray();
+            
+            $syncedOvers = array_merge($syncedOvers, $overs);
+        }
+
+        return response()->json([
+            'match_id' => $matchId,
+            'status' => $match->status,
+            'current_innings' => $innings->where('is_closed', false)->first()?->innings_no ?? ($innings->last()?->innings_no ?? 1),
+            'synced_overs' => $syncedOvers,
+        ]);
+    }
 }

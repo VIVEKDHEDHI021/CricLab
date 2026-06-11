@@ -46,29 +46,9 @@ import {
 } from "lucide-react";
 import { WinnerCelebrationOverlay } from "@/components/WinnerCelebrationOverlay";
 import { backupService } from "@/lib/services/backupService";
+import { indexedDbService, BallEvent } from "@/lib/services/indexedDbService";
 
 export const Route = createFileRoute("/matches/$id/score")({ component: LiveScoring });
-
-interface BallEvent {
-  id: string;
-  matchId: string;
-  inningsId: string;
-  ballIndex: number;
-  overNumber: number;
-  ballInOver: number;
-  batterId: string;
-  nonStrikerId: string | null;
-  bowlerId: string;
-  runs: number;
-  extraRuns: number;
-  extraType: "wide" | "no_ball" | "bye" | "leg_bye" | null;
-  isWicket: boolean;
-  wicketType: string | null;
-  isLegal: boolean;
-  caughtById: string | null;
-  timestamp: number;
-  synced: boolean;
-}
 
 interface UndoState {
   inningsId: string;
@@ -452,77 +432,7 @@ function LiveScoring() {
     }
   }, [undoStates, id]);
 
-  // 3. Clear synced events once they are present in the server's balls list
-  useEffect(() => {
-    if (balls.length > 0 && localEvents.length > 0) {
-      setLocalEvents((prev) =>
-        prev.filter((le) => {
-          if (!le.synced) return true;
-          const serverHasIt = balls.some((b) => b.ball_index === le.ballIndex && b.innings_id === le.inningsId);
-          return !serverHasIt;
-        })
-      );
-    }
-  }, [balls]);
 
-  // 4. Background Sync Engine
-  useEffect(() => {
-    let active = true;
-    
-    const syncNextEvent = async () => {
-      const pending = localEvents.find((e) => !e.synced);
-      if (!pending) {
-        if (syncing) setSyncing(false);
-        return;
-      }
-      
-      setSyncing(true);
-      setSyncError(null);
-      
-      try {
-        await ballService.addBall(pending.inningsId, {
-          match_id: pending.matchId,
-          ball_index: pending.ballIndex,
-          over_number: pending.overNumber,
-          ball_in_over: pending.ballInOver,
-          batter_id: pending.batterId,
-          non_striker_id: pending.nonStrikerId,
-          bowler_id: pending.bowlerId,
-          runs: pending.runs,
-          extra_runs: pending.extraRuns,
-          extra_type: pending.extraType,
-          is_wicket: pending.isWicket,
-          wicket_type: pending.wicketType,
-          is_legal: pending.isLegal,
-          caught_by_id: pending.caughtById,
-        });
-        
-        if (!active) return;
-        
-        // Mark as synced locally
-        setLocalEvents((prev) =>
-          prev.map((e) => (e.id === pending.id ? { ...e, synced: true } : e))
-        );
-        reload();
-      } catch (err: any) {
-        if (!active) return;
-        console.error("Failed to sync event", pending, err);
-        setSyncing(false);
-        setSyncError(err.response?.data?.message || err.message || "Network Error");
-        
-        // Auto-retry after 3 seconds
-        setTimeout(() => {
-          if (active) syncNextEvent();
-        }, 3000);
-      }
-    };
-
-    syncNextEvent();
-
-    return () => {
-      active = false;
-    };
-  }, [localEvents]);
 
   const reload = async () => {
     try {
@@ -772,6 +682,122 @@ function LiveScoring() {
   const innBalls = useMemo(() => {
     return combinedBalls.filter((b) => b.innings_id === currentInn?.id);
   }, [combinedBalls, currentInn]);
+
+  // 3. Load local data from IndexedDB
+  const loadLocalData = async () => {
+    if (currentInn) {
+      const dbBalls = await indexedDbService.getDeliveries(id, currentInn.innings_no);
+      setLocalEvents(dbBalls);
+    }
+  };
+
+  useEffect(() => {
+    loadLocalData();
+  }, [currentInn?.id]);
+
+  // 4. Over-Based Background Sync Engine
+  const syncPendingData = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      // 1. Process pending deletions first
+      const pendingDeletions = await indexedDbService.getPendingDeletions(id);
+      for (const pd of pendingDeletions) {
+        try {
+          await ballService.undoBall(pd.id);
+          await indexedDbService.removePendingDeletion(pd.id);
+        } catch (err: any) {
+          if (err.response?.status === 404 || err.response?.status === 422) {
+            await indexedDbService.removePendingDeletion(pd.id);
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      // 2. Fetch match sync status from the server
+      const status = await ballService.syncStatus(id);
+
+      // 3. Process pending overs
+      if (currentInn) {
+        const localOvers = await indexedDbService.getOvers(id, currentInn.innings_no);
+        const pendingOvers = localOvers.filter((o) => o.status === 'PENDING');
+
+        for (const po of pendingOvers) {
+          const isAlreadySyncedOnServer = status.synced_overs.some(
+            (so) => so.innings_no === po.inningsNo && so.over_no === po.overNo
+          );
+
+          if (isAlreadySyncedOnServer) {
+            await indexedDbService.saveOverStatus(id, po.inningsNo, po.overNo, 'SYNCED');
+            continue;
+          }
+
+          const allDelivs = await indexedDbService.getDeliveries(id, po.inningsNo);
+          const overDelivs = allDelivs.filter((d) => d.overNumber === po.overNo);
+
+          if (overDelivs.length === 0) {
+            continue;
+          }
+
+          const payload = {
+            innings_no: po.inningsNo,
+            over_no: po.overNo,
+            bowler_id: overDelivs[0].bowlerId,
+            deliveries: overDelivs.map((d) => ({
+              id: d.id,
+              ball_index: d.ballIndex,
+              ball_in_over: d.ballInOver,
+              batter_id: d.batterId,
+              non_striker_id: d.nonStrikerId,
+              runs: d.runs,
+              extra_runs: d.extraRuns,
+              extra_type: d.extraType,
+              is_wicket: d.isWicket,
+              wicket_type: d.wicketType,
+              is_legal: d.isLegal,
+              caught_by_id: d.caughtById,
+            })),
+          };
+
+          try {
+            await ballService.syncOver(id, payload);
+            await indexedDbService.saveOverStatus(id, po.inningsNo, po.overNo, 'SYNCED');
+
+            const delIds = overDelivs.map((d) => d.id);
+            await indexedDbService.markDeliveriesSynced(delIds);
+          } catch (err: any) {
+            if (err.response?.status === 422) {
+              toast.error(err.response?.data?.message || "Sync Validation Error");
+              await indexedDbService.deleteOverStatus(id, po.inningsNo, po.overNo);
+              for (const d of overDelivs) {
+                await indexedDbService.deleteDelivery(d.id);
+              }
+              await loadLocalData();
+            } else {
+              throw err;
+            }
+          }
+        }
+      }
+
+      await reload();
+    } catch (err: any) {
+      console.error("Sync loop failed", err);
+      setSyncError(err.message || "Network Error");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      syncPendingData();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [id, currentInn?.id]);
 
   const handleSaveEdit = async () => {
     if (!editingBall) return;
@@ -1575,6 +1601,7 @@ function LiveScoring() {
       id: localId,
       matchId: id,
       inningsId: currentInn.id,
+      inningsNo: currentInn.innings_no,
       ballIndex,
       overNumber: overNo,
       ballInOver,
@@ -1652,7 +1679,17 @@ function LiveScoring() {
     }
 
     // Save event locally
-    setLocalEvents((prev) => [...prev, newEvent]);
+    (async () => {
+      await indexedDbService.saveDelivery({
+        ...newEvent,
+        inningsNo: currentInn.innings_no
+      });
+      if (newLegal % 6 === 0) {
+        await indexedDbService.saveOverStatus(id, currentInn.innings_no, newEvent.overNumber, 'PENDING');
+        syncPendingData();
+      }
+      loadLocalData();
+    })();
     setShowUndoBanner(true);
     setUndoCountdown(10);
   };
@@ -1721,6 +1758,7 @@ function LiveScoring() {
       id: localId,
       matchId: id,
       inningsId: currentInn.id,
+      inningsNo: currentInn.innings_no,
       ballIndex,
       overNumber: overNo,
       ballInOver: isLegal ? ballInOver : (legalCount % 6) + 1,
@@ -1852,7 +1890,17 @@ function LiveScoring() {
     }
 
     // Save event locally
-    setLocalEvents((prev) => [...prev, newEvent]);
+    (async () => {
+      await indexedDbService.saveDelivery({
+        ...newEvent,
+        inningsNo: currentInn.innings_no
+      });
+      if (isLegal && newLegal % 6 === 0) {
+        await indexedDbService.saveOverStatus(id, currentInn.innings_no, newEvent.overNumber, 'PENDING');
+        syncPendingData();
+      }
+      loadLocalData();
+    })();
     setUnlocked(false);
     setShowUndoBanner(true);
     setUndoCountdown(10);
@@ -1877,25 +1925,16 @@ function LiveScoring() {
       }
     }
 
-    // Backup current scoring state in case of failure
-    const backupState = {
-      striker,
-      nonStriker,
-      bowler,
-      isSoloPlay,
-    };
-
     // Find the state snapshot for the ball we are undoing
     const lastStateSnapshot = undoStates.find(
-      (us) => us.inningsId === last.innings_id && us.ballIndex === last.ball_index
+      (us) => us.inningsId === (last.innings_id || last.inningsId) && us.ballIndex === (last.ball_index || last.ballIndex)
     );
 
     // Optimistic undo update
     setUndoneBallIds((prev) => [...prev, last.id]);
-    setLocalEvents((prev) => prev.filter((le) => le.id !== last.id));
     setUndoStates((prev) =>
       prev.filter(
-        (us) => !(us.inningsId === last.innings_id && us.ballIndex === last.ball_index)
+        (us) => !(us.inningsId === (last.innings_id || last.inningsId) && us.ballIndex === (last.ball_index || last.ballIndex))
       )
     );
     triggerHaptic();
@@ -1907,32 +1946,27 @@ function LiveScoring() {
       setBowler(lastStateSnapshot.bowler);
       setIsSoloPlay(lastStateSnapshot.isSoloPlay);
     } else {
-      // Fallback: clear and let auto-initialize handle it
       setStriker("");
       setNonStriker("");
       setBowler("");
     }
 
     try {
-      await ballService.undoBall(last.id);
-      toast.success("Last ball undone");
-      reload();
-    } catch (err: any) {
-      // Revert optimistic undo state on failure
-      setUndoneBallIds((prev) => prev.filter((id) => id !== last.id));
-      
-      // Restore backup state
-      setStriker(backupState.striker);
-      setNonStriker(backupState.nonStriker);
-      setBowler(backupState.bowler);
-      setIsSoloPlay(backupState.isSoloPlay);
+      await indexedDbService.deleteDelivery(last.id);
 
-      // Restore snapshot entry
-      if (lastStateSnapshot) {
-        setUndoStates((prev) => [...prev, lastStateSnapshot]);
+      const lastBallOverNo = last.over_number !== undefined ? last.over_number : last.overNumber;
+      await indexedDbService.deleteOverStatus(id, currentInn.innings_no, lastBallOverNo);
+
+      if (!last.id.startsWith('local_')) {
+        await indexedDbService.addPendingDeletion(last.id, id);
       }
 
-      toast.error(err.response?.data?.message || err.message);
+      toast.success("Last ball undone");
+      syncPendingData();
+      await loadLocalData();
+    } catch (err: any) {
+      console.error("Failed to undo ball locally", err);
+      toast.error("Failed to undo ball: " + err.message);
     }
   };
 

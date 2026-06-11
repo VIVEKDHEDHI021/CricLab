@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Traits\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
     'innings_id', 'match_id', 'ball_index', 'over_number', 'ball_in_over',
@@ -13,7 +14,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 ])]
 class Ball extends Model
 {
-    use HasUuid;
+    use HasUuid, SoftDeletes;
 
     protected $casts = [
         'is_wicket' => 'boolean',
