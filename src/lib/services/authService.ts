@@ -9,6 +9,7 @@ export type AuthUser = {
   google_id?: string;
   email?: string;
   must_change_password?: boolean;
+  is_profile_setup_completed?: boolean;
 };
 
 export type LoginResponse = {

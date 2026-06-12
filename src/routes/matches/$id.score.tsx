@@ -2918,10 +2918,12 @@ function LiveScoring() {
         </div>
       )}
 
-      <div className="bg-background min-h-screen text-foreground font-sans pb-12">
+      <div className="bg-background text-foreground font-sans flex flex-col" style={{ height: '100dvh', overflow: 'hidden' }}>
         {CustomHeader}
 
-        <div className="max-w-xl mx-auto px-4 pt-4 space-y-4">
+        {/* Top scrollable info zone */}
+        <div className="flex-shrink-0 overflow-y-auto" style={{ maxHeight: '42vh' }}>
+        <div className="max-w-xl mx-auto px-3 pt-2 space-y-2">
           {/* Banner Score Card */}
           <Card className="p-4 rounded-2xl relative overflow-hidden border border-border/40 shadow-md">
             <div className="flex items-center justify-between relative pb-1">
@@ -3005,7 +3007,7 @@ function LiveScoring() {
           </Card>
 
           {/* Live Match Insights Card */}
-          <Card className="p-4 rounded-2xl border border-border/40 shadow-md bg-card dark:bg-gradient-to-br dark:from-slate-900/60 dark:to-slate-950/80 dark:backdrop-blur-md">
+          <Card className="p-2 rounded-2xl border border-border/40 shadow-md bg-card dark:bg-gradient-to-br dark:from-slate-900/60 dark:to-slate-950/80 dark:backdrop-blur-md">
             <h3 className="text-xs font-black text-primary uppercase tracking-widest mb-3 flex items-center gap-1.5">
               <Sparkles className="h-3.5 w-3.5 text-primary" /> Live Match Insights
             </h3>
@@ -3133,9 +3135,14 @@ function LiveScoring() {
               </div>
             </div>
           </Card>
+        </div>
+        </div>
 
+        {/* Bottom fixed scoring zone */}
+        <div className="flex-1 overflow-y-auto">
+        <div className="max-w-xl mx-auto px-3 pb-3 space-y-2 pt-2">
           {/* Current Over Card */}
-          <Card className="p-4 rounded-2xl border border-border/40 shadow-md">
+          <Card className="p-3 rounded-2xl border border-border/40 shadow-md">
             <div className="flex justify-between items-start mb-3">
               <span className="text-sm font-extrabold text-foreground mt-0.5">
                 Current Over ({oversText(currentInn.legal_balls)})
@@ -3559,7 +3566,12 @@ function LiveScoring() {
               </div>
             )}
           </Card>
+        </div>
+        </div>
 
+        {/* Below-fold: Scorer Controls / Dropdowns — hidden in single-frame, accessible by scroll */}
+        <div className="hidden">
+        <div className="max-w-xl mx-auto px-3">
           {/* Scorer Controls / Dropdowns (preserving theme card classes) */}
           {canScore ? (
             <Card className="p-4 rounded-2xl border border-border/40 shadow-md space-y-3.5 relative overflow-hidden">
@@ -3955,6 +3967,7 @@ function LiveScoring() {
           )}
         </div>
       </div>
+        </div>
 
       <Dialog open={isWicketDialogOpen} onOpenChange={setIsWicketDialogOpen}>
         <DialogContent className="max-w-md bg-card border border-border text-foreground rounded-2xl shadow-xl">

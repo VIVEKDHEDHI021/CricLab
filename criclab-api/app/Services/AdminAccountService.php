@@ -67,6 +67,42 @@ class AdminAccountService
             return null;
         }
 
+        $existing = Account::where('mobile', $mobile)->first();
+        if ($existing && $existing->role === $expectedRole) {
+            $updates = [];
+            if ($existing->name !== $account['name']) {
+                $updates['name'] = $account['name'];
+            }
+            if ($existing->username !== $account['username']) {
+                $updates['username'] = $account['username'];
+            }
+            if (!empty($updates)) {
+                $existing->update($updates);
+            }
+
+            try {
+                $player = Player::where('mobile', $mobile)->first();
+                if ($player) {
+                    if ($player->user_id !== $existing->id || $player->name !== $account['name']) {
+                        $player->update([
+                            'user_id' => $existing->id,
+                            'name' => $account['name'],
+                        ]);
+                    }
+                } else {
+                    Player::create([
+                        'name' => $account['name'],
+                        'mobile' => $mobile,
+                        'user_id' => $existing->id,
+                    ]);
+                }
+            } catch (\Throwable) {
+                // Player link is optional.
+            }
+
+            return $existing;
+        }
+
         return self::ensureAccount(
             $mobile,
             $account['name'],
@@ -85,23 +121,45 @@ class AdminAccountService
     ): Account {
         $mobile = self::normalizeMobile($mobile);
 
-        $account = Account::updateOrCreate(
-            ['mobile' => $mobile],
-            [
+        $account = Account::where('mobile', $mobile)->first();
+
+        if ($account) {
+            $updates = [];
+            if ($account->name !== $name) {
+                $updates['name'] = $name;
+            }
+            if ($account->username !== $username) {
+                $updates['username'] = $username;
+            }
+            if ($account->role !== $role) {
+                $updates['role'] = $role;
+            }
+            if (!Hash::check($plainPassword, $account->password)) {
+                $updates['password'] = Hash::make($plainPassword);
+            }
+
+            if (!empty($updates)) {
+                $account->update($updates);
+            }
+        } else {
+            $account = Account::create([
+                'mobile' => $mobile,
                 'name' => $name,
                 'username' => $username,
                 'password' => Hash::make($plainPassword),
                 'role' => $role,
-            ],
-        );
+            ]);
+        }
 
         try {
             $player = Player::where('mobile', $mobile)->first();
             if ($player) {
-                $player->update([
-                    'user_id' => $account->id,
-                    'name' => $name,
-                ]);
+                if ($player->user_id !== $account->id || $player->name !== $name) {
+                    $player->update([
+                        'user_id' => $account->id,
+                        'name' => $name,
+                    ]);
+                }
             } else {
                 Player::create([
                     'name' => $name,

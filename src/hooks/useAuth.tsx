@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { authService, type AuthUser } from "@/lib/services/authService";
 import { getToken, clearToken } from "@/lib/api";
-import { playerService } from "@/lib/services/playerService";
+import { toast } from "sonner";
 
 export type Role = "admin" | "user" | "scorer" | null;
 
@@ -16,6 +16,7 @@ type Ctx = {
   refreshRole: () => Promise<void>;
   signOut: () => Promise<void>;
   setIsProfileSetupCompleted: (val: boolean) => void;
+  setAuthUser: (user: AuthUser) => void;
 };
 
 const AuthCtx = createContext<Ctx>({
@@ -25,7 +26,23 @@ const AuthCtx = createContext<Ctx>({
   mustChangePassword: false,
   refreshRole: async () => {}, signOut: async () => {},
   setIsProfileSetupCompleted: () => {},
+  setAuthUser: () => {},
 });
+
+const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+    promise
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -36,26 +53,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const setAuthUser = (me: AuthUser) => {
+    setUser(me);
+    setRole(me.role);
+    setProfileName(me.name);
+    setMobile(me.mobile);
+    setMustChangePassword(!!me.must_change_password);
+    setIsProfileSetupCompleted(!!me.is_profile_setup_completed);
+  };
+
   const loadUser = async () => {
     try {
-      const me = await authService.getMe();
-      setUser(me);
-      setRole(me.role);
-      setProfileName(me.name);
-      setMobile(me.mobile);
-      setMustChangePassword(!!me.must_change_password);
-
-      try {
-        const players = await playerService.getPlayers();
-        const found = players.find(p => p.mobile === me.mobile || p.user_id === me.id);
-        if (found && found.role && found.batting_style) {
-          setIsProfileSetupCompleted(true);
-        } else {
-          setIsProfileSetupCompleted(false);
-        }
-      } catch {
-        setIsProfileSetupCompleted(false);
-      }
+      const me = await withTimeout(authService.getMe(), 5000, "Session verification timed out.");
+      setAuthUser(me);
     } catch (err: any) {
       setUser(null);
       setRole(null);
@@ -63,10 +73,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setMobile(null);
       setIsProfileSetupCompleted(false);
       setMustChangePassword(false);
-      // Only clear token if the server explicitly responded with 401 Unauthorized
-      if (err.response?.status === 401) {
-        clearToken();
-      }
+      clearToken();
+      toast.error(err.message || "Session verification failed. Please sign in again.");
     }
   };
 
@@ -106,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthCtx.Provider value={{ user, role, loading, profileName, mobile, isProfileSetupCompleted, mustChangePassword, refreshRole, signOut, setIsProfileSetupCompleted }}>
+    <AuthCtx.Provider value={{ user, role, loading, profileName, mobile, isProfileSetupCompleted, mustChangePassword, refreshRole, signOut, setIsProfileSetupCompleted, setAuthUser }}>
       {children}
     </AuthCtx.Provider>
   );

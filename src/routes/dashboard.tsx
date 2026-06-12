@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useState, useEffect, useMemo, useRef } from "react";
 import { 
   Trophy, Share2, Award, Zap, Shield, Sparkles, User, 
-  ChevronLeft, ChevronRight, Star, Heart
+  ChevronLeft, ChevronRight, Star, Heart, AlertCircle, RotateCcw
 } from "lucide-react";
 
 export const Route = createFileRoute("/dashboard")({ component: Dashboard });
@@ -197,19 +197,60 @@ function CanvasConfetti() {
   return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-[9999]" />;
 }
 
+function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <Card className="p-5 border border-destructive/20 bg-destructive/5 rounded-2xl flex flex-col items-center justify-center gap-2 text-center my-1 backdrop-blur-sm">
+      <div className="flex items-center gap-2 text-destructive">
+        <AlertCircle className="h-4 w-4" />
+        <span className="text-xs font-black uppercase tracking-widest">Load Error</span>
+      </div>
+      <p className="text-[11px] text-muted-foreground max-w-xs">{message}</p>
+      <Button 
+        size="sm" 
+        variant="outline" 
+        className="mt-1 h-8 text-xs font-bold gap-1 border-destructive/30 text-destructive hover:bg-destructive/10 cursor-pointer" 
+        onClick={onRetry}
+      >
+        <RotateCcw className="h-3 w-3" /> Retry
+      </Button>
+    </Card>
+  );
+}
+
+function SectionSkeleton({ heightClass = "h-24" }: { heightClass?: string }) {
+  return (
+    <Card className={`p-4 border border-border/40 bg-card rounded-2xl animate-pulse flex items-center justify-between ${heightClass}`}>
+      <div className="flex items-center gap-3 w-2/3">
+        <div className="h-10 w-10 rounded-full bg-muted shrink-0" />
+        <div className="flex-1 space-y-2">
+          <div className="h-3.5 bg-muted rounded w-3/4" />
+          <div className="h-2.5 bg-muted rounded w-1/2" />
+        </div>
+      </div>
+      <div className="h-6 w-12 bg-muted rounded w-12 shrink-0" />
+    </Card>
+  );
+}
+
 function Dashboard() {
   const { role } = useAuth();
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({ queryKey: ["matches"], queryFn: fetchMatchSummaries });
+  const { data, isLoading: isLoadingMatches, isError: isErrorMatches, refetch: refetchMatches } = useQuery({
+    queryKey: ["matches"],
+    queryFn: fetchMatchSummaries,
+    retry: 1,
+  });
   
-  const { data: motd } = useQuery({
+  const { data: motd, isLoading: isLoadingMotd, isError: isErrorMotd, refetch: refetchMotd } = useQuery({
     queryKey: ["manOfTheDay"],
     queryFn: () => playerService.getManOfTheDay(),
+    retry: 1,
   });
 
-  const { data: rankings } = useQuery({
+  const { data: rankings, isLoading: isLoadingRankings, isError: isErrorRankings, refetch: refetchRankings } = useQuery({
     queryKey: ["playerRankings"],
     queryFn: () => playerService.getPlayerRankings(),
+    retry: 1,
   });
 
   const items = data ?? [];
@@ -218,6 +259,7 @@ function Dashboard() {
 
   const [heroData, setHeroData] = useState<any[]>([]);
   const [loadingHeroes, setLoadingHeroes] = useState(false);
+  const [heroesError, setHeroesError] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const [showConfetti, setShowConfetti] = useState(false);
@@ -493,23 +535,27 @@ function Dashboard() {
     });
   };
 
+  const fetchHeroes = async () => {
+    if (past.length < 3) return;
+    try {
+      setLoadingHeroes(true);
+      setHeroesError(false);
+      const latest3 = past.slice(0, 3);
+      const matchDetails = await Promise.all(
+        latest3.map((m) => matchService.getMatch(m.id))
+      );
+      const cards = computeHeroCards(matchDetails);
+      setHeroData(cards);
+    } catch (e) {
+      console.error("Failed to load hero data", e);
+      setHeroesError(true);
+    } finally {
+      setLoadingHeroes(false);
+    }
+  };
+
   useEffect(() => {
     if (past.length >= 3) {
-      const fetchHeroes = async () => {
-        try {
-          setLoadingHeroes(true);
-          const latest3 = past.slice(0, 3);
-          const matchDetails = await Promise.all(
-            latest3.map((m) => matchService.getMatch(m.id))
-          );
-          const cards = computeHeroCards(matchDetails);
-          setHeroData(cards);
-        } catch (e) {
-          console.error("Failed to load hero data", e);
-        } finally {
-          setLoadingHeroes(false);
-        }
-      };
       fetchHeroes();
     }
   }, [past.length]);
@@ -661,364 +707,385 @@ function Dashboard() {
 
   return (
     <AppShell>
-      {isLoading ? (
-        <div className="text-muted-foreground text-xs font-bold tracking-widest text-center py-10 animate-pulse uppercase">
-          Loading Matches…
-        </div>
-      ) : (
-        <div className="space-y-6 max-w-md mx-auto">
-          {/* Man of the Day Section */}
-          {motd && motd.player && (
-            <Card className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-purple-500/10 border border-amber-500/25 shadow-md relative overflow-hidden backdrop-blur-sm">
-              <div className="absolute -top-3 -right-3 w-16 h-16 bg-amber-500/15 rounded-full blur-xl pointer-events-none" />
-              
-              <div className="flex items-center justify-between mb-3">
-                <span className="bg-amber-500/25 border border-amber-500/40 text-amber-500 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm leading-none">
-                  <Sparkles className="h-3 w-3 animate-pulse" />
-                  Man of the Day
+      <div className="space-y-6 max-w-md mx-auto">
+        {/* Man of the Day Section */}
+        {isLoadingMotd ? (
+          <SectionSkeleton />
+        ) : isErrorMotd ? (
+          <SectionError message="Failed to load Man of the Day stats." onRetry={refetchMotd} />
+        ) : motd && motd.player ? (
+          <Card className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-purple-500/10 border border-amber-500/25 shadow-md relative overflow-hidden backdrop-blur-sm">
+            <div className="absolute -top-3 -right-3 w-16 h-16 bg-amber-500/15 rounded-full blur-xl pointer-events-none" />
+            
+            <div className="flex items-center justify-between mb-3">
+              <span className="bg-amber-500/25 border border-amber-500/40 text-amber-500 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm leading-none">
+                <Sparkles className="h-3 w-3 animate-pulse" />
+                Man of the Day
+              </span>
+              {motd.timeframe && (
+                <span className="text-[9px] font-extrabold text-muted-foreground bg-muted/60 border border-border/40 px-2 py-0.5 rounded-md leading-none">
+                  {motd.timeframe}
                 </span>
-                {motd.timeframe && (
-                  <span className="text-[9px] font-extrabold text-muted-foreground bg-muted/60 border border-border/40 px-2 py-0.5 rounded-md leading-none">
-                    {motd.timeframe}
-                  </span>
-                )}
-              </div>
+              )}
+            </div>
 
-              <div className="flex items-center gap-3.5">
-                <div className="relative">
-                  <div className="w-12 h-12 rounded-full border border-amber-400 p-0.5 bg-card shadow-sm overflow-hidden flex items-center justify-center shrink-0">
-                    {motd.player.avatar ? (
-                      <img src={motd.player.avatar} alt={motd.player.name} className="w-full h-full object-cover rounded-full" />
-                    ) : (
-                      <span className="text-amber-500 font-extrabold text-sm">
-                        {motd.player.name.slice(0, 2).toUpperCase()}
-                      </span>
-                    )}
-                  </div>
-                  <span className="absolute -bottom-1 -right-1 bg-amber-500 text-[10px] p-0.5 rounded-full border border-card shadow-sm leading-none">
-                    👑
-                  </span>
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-extrabold text-sm text-foreground truncate hover:text-primary transition-colors">
-                    <Link to="/players/$id" params={{ id: motd.player.id }}>
-                      {motd.player.name}
-                    </Link>
-                  </h3>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 font-semibold">
-                    {motd.player.team?.name || "No Team Assigned"}
-                  </p>
-                  
-                  <div className="flex gap-3 mt-1.5 text-xs text-muted-foreground font-semibold">
-                    {motd.stats && motd.stats.runs > 0 && (
-                      <div>
-                        Runs: <span className="font-bold text-foreground">{motd.stats.runs}</span>
-                      </div>
-                    )}
-                    {motd.stats && motd.stats.wickets > 0 && (
-                      <div>
-                        Wkts: <span className="font-bold text-foreground">{motd.stats.wickets}</span>
-                      </div>
-                    )}
-                    {motd.stats && motd.stats.catches > 0 && (
-                      <div>
-                        Ctch: <span className="font-bold text-foreground">{motd.stats.catches}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="text-right shrink-0">
-                  <span className="text-[9px] text-muted-foreground uppercase font-black tracking-wider block leading-none">MVP score</span>
-                  <span className="text-2xl font-black text-amber-500 block mt-1 leading-none">{motd.stats?.mvp || 0}</span>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* 👑 CricLab Heroes Section */}
-          <section className="space-y-3 relative">
-            <h2 className="text-xs font-black uppercase tracking-widest text-amber-500 flex items-center gap-1.5 px-1">
-              <Sparkles className="h-4 w-4 text-orange-500 animate-pulse" /> 👑 CricLab Heroes
-            </h2>
-
-            {past.length < 3 ? (
-              <Card className="p-6 text-center border border-amber-500/20 bg-card dark:bg-slate-900/60 backdrop-blur-md rounded-2xl shadow-[0_0_15px_rgba(245,158,11,0.05)] relative overflow-hidden my-1">
-                <div className="absolute -top-10 -left-10 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
-                <span className="text-3xl block mb-2 animate-bounce">🏏</span>
-                <h3 className="text-sm font-black text-amber-500 uppercase tracking-widest mb-1.5">Become a CricLab Hero!</h3>
-                <p className="text-xs text-muted-foreground/80 max-w-xs mx-auto leading-relaxed">
-                  Play and complete at least 3 matches to unlock your players' stats in the premium Heroes Showcase!
-                </p>
-                <Link to="/matches/new" className="inline-block mt-4">
-                  <Button size="sm" className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-[11px] uppercase tracking-wider px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/20 active:scale-97 transition-all cursor-pointer">
-                    Create Match
-                  </Button>
-                </Link>
-              </Card>
-            ) : loadingHeroes ? (
-              <Card className="p-8 text-center bg-card dark:bg-slate-900/40 border border-border/40 rounded-2xl animate-pulse flex flex-col items-center justify-center gap-2">
-                <div className="h-4 w-32 bg-muted rounded"></div>
-                <div className="h-3 w-48 bg-muted rounded mt-2"></div>
-              </Card>
-            ) : heroData.length > 0 && currentHero ? (
-              <div 
-                className="relative overflow-hidden touch-pan-y"
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-              >
-                <Card 
-                  className={`p-5 rounded-2xl bg-card dark:bg-gradient-to-br dark:from-slate-900/80 dark:via-slate-950/90 dark:to-slate-900/80 border transition-all duration-500 ${
-                    currentHero.userAppreciated 
-                      ? "border-orange-500 shadow-[0_0_20px_rgba(249,115,22,0.3)] scale-[1.01]" 
-                      : "border-orange-500/30 shadow-[0_0_15px_rgba(249,115,22,0.1)]"
-                  }`}
-                >
-                  {/* Glowing effect inside */}
-                  <div className="absolute top-[-40px] right-[-40px] w-32 h-32 bg-orange-500/10 rounded-full blur-2xl pointer-events-none" />
-
-                  {/* Header Badge & Impact Score */}
-                  <div className="flex justify-between items-start mb-4">
-                    <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded bg-orange-500/20 border border-orange-500/40 text-orange-500">
-                      {currentHero.badge}
+            <div className="flex items-center gap-3.5">
+              <div className="relative">
+                <div className="w-12 h-12 rounded-full border border-amber-400 p-0.5 bg-card shadow-sm overflow-hidden flex items-center justify-center shrink-0">
+                  {motd.player.avatar ? (
+                    <img src={motd.player.avatar} alt={motd.player.name} className="w-full h-full object-cover rounded-full" />
+                  ) : (
+                    <span className="text-amber-500 font-extrabold text-sm">
+                      {motd.player.name.slice(0, 2).toUpperCase()}
                     </span>
-                    <div className="text-right">
-                      <span className="text-[8px] font-black text-muted-foreground uppercase tracking-widest block leading-none">Impact Score</span>
-                      <span className="text-lg font-black text-orange-500 block leading-none mt-1">
-                        {currentHero.impactScore}/100
-                      </span>
-                    </div>
-                  </div>
+                  )}
+                </div>
+                <span className="absolute -bottom-1 -right-1 bg-amber-500 text-[10px] p-0.5 rounded-full border border-card shadow-sm leading-none">
+                  👑
+                </span>
+              </div>
 
-                  {/* Player & Team Info */}
-                  <div className="flex items-center gap-3.5 mb-4">
-                    <div className="h-14 w-14 rounded-full border border-orange-500/50 p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0 shadow">
-                      {currentHero.avatar ? (
-                        <img src={currentHero.avatar} alt={currentHero.playerName} className="h-full w-full object-cover rounded-full" />
+              <div className="flex-1 min-w-0">
+                <h3 className="font-extrabold text-sm text-foreground truncate hover:text-primary transition-colors">
+                  <Link to="/players/$id" params={{ id: motd.player.id }}>
+                    {motd.player.name}
+                  </Link>
+                </h3>
+                <p className="text-[10px] text-muted-foreground mt-0.5 font-semibold">
+                  {motd.player.team?.name || "No Team Assigned"}
+                </p>
+                
+                <div className="flex gap-3 mt-1.5 text-xs text-muted-foreground font-semibold">
+                  {motd.stats && motd.stats.runs > 0 && (
+                    <div>
+                      Runs: <span className="font-bold text-foreground">{motd.stats.runs}</span>
+                    </div>
+                  )}
+                  {motd.stats && motd.stats.wickets > 0 && (
+                    <div>
+                      Wkts: <span className="font-bold text-foreground">{motd.stats.wickets}</span>
+                    </div>
+                  )}
+                  {motd.stats && motd.stats.catches > 0 && (
+                    <div>
+                      Ctch: <span className="font-bold text-foreground">{motd.stats.catches}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="text-right shrink-0">
+                <span className="text-[9px] text-muted-foreground uppercase font-black tracking-wider block leading-none">MVP score</span>
+                <span className="text-2xl font-black text-amber-500 block mt-1 leading-none">{motd.stats?.mvp || 0}</span>
+              </div>
+            </div>
+          </Card>
+        ) : null}
+
+        {/* 👑 CricLab Heroes Section */}
+        <section className="space-y-3 relative">
+          <h2 className="text-xs font-black uppercase tracking-widest text-amber-500 flex items-center gap-1.5 px-1">
+            <Sparkles className="h-4 w-4 text-orange-500 animate-pulse" /> 👑 CricLab Heroes
+          </h2>
+
+          {isLoadingMatches ? (
+            <SectionSkeleton heightClass="h-48" />
+          ) : isErrorMatches ? (
+            <SectionError message="Failed to load matches for Heroes." onRetry={refetchMatches} />
+          ) : loadingHeroes ? (
+            <SectionSkeleton heightClass="h-48" />
+          ) : heroesError ? (
+            <SectionError message="Failed to load CricLab Heroes." onRetry={fetchHeroes} />
+          ) : past.length < 3 ? (
+            <Card className="p-6 text-center border border-amber-500/20 bg-card dark:bg-slate-900/60 backdrop-blur-md rounded-2xl shadow-[0_0_15px_rgba(245,158,11,0.05)] relative overflow-hidden my-1">
+              <div className="absolute -top-10 -left-10 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+              <span className="text-3xl block mb-2 animate-bounce">🏏</span>
+              <h3 className="text-sm font-black text-amber-500 uppercase tracking-widest mb-1.5">Become a CricLab Hero!</h3>
+              <p className="text-xs text-muted-foreground/80 max-w-xs mx-auto leading-relaxed">
+                Play and complete at least 3 matches to unlock your players' stats in the premium Heroes Showcase!
+              </p>
+              <Link to="/matches/new" className="inline-block mt-4">
+                <Button size="sm" className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-[11px] uppercase tracking-wider px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/20 active:scale-97 transition-all cursor-pointer">
+                  Create Match
+                </Button>
+              </Link>
+            </Card>
+          ) : heroData.length > 0 && currentHero ? (
+            <div 
+              className="relative overflow-hidden touch-pan-y"
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+            >
+              <Card 
+                className={`p-5 rounded-2xl bg-card dark:bg-gradient-to-br dark:from-slate-900/80 dark:via-slate-950/90 dark:to-slate-900/80 border transition-all duration-500 ${
+                  currentHero.userAppreciated 
+                    ? "border-orange-500 shadow-[0_0_20px_rgba(249,115,22,0.3)] scale-[1.01]" 
+                    : "border-orange-500/30 shadow-[0_0_15px_rgba(249,115,22,0.1)]"
+                }`}
+              >
+                {/* Glowing effect inside */}
+                <div className="absolute top-[-40px] right-[-40px] w-32 h-32 bg-orange-500/10 rounded-full blur-2xl pointer-events-none" />
+
+                {/* Header Badge & Impact Score */}
+                <div className="flex justify-between items-start mb-4">
+                  <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded bg-orange-500/20 border border-orange-500/40 text-orange-500">
+                    {currentHero.badge}
+                  </span>
+                  <div className="text-right">
+                    <span className="text-[8px] font-black text-muted-foreground uppercase tracking-widest block leading-none">Impact Score</span>
+                    <span className="text-lg font-black text-orange-500 block leading-none mt-1">
+                      {currentHero.impactScore}/100
+                    </span>
+                  </div>
+                </div>
+
+                {/* Player & Team Info */}
+                <div className="flex items-center gap-3.5 mb-4">
+                  <div className="h-14 w-14 rounded-full border border-orange-500/50 p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0 shadow">
+                    {currentHero.avatar ? (
+                      <img src={currentHero.avatar} alt={currentHero.playerName} className="h-full w-full object-cover rounded-full" />
+                    ) : (
+                      <span className="font-extrabold text-orange-500 text-lg">
+                        {currentHero.playerName.slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-black text-base text-foreground truncate hover:text-orange-500 transition-colors">
+                      <Link to="/players/$id" params={{ id: currentHero.playerId }}>
+                        {currentHero.playerName}
+                      </Link>
+                    </h3>
+                    <p className="text-[10px] text-muted-foreground font-black uppercase tracking-wider mt-0.5">
+                      {currentHero.teamName}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Highlight Stats */}
+                <div className="bg-muted/40 rounded-xl border border-border/20 p-3 mb-4 grid grid-cols-2 gap-3 text-center">
+                  <div className="min-w-0">
+                    <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest block leading-none truncate">
+                      {currentHero.label1}
+                    </span>
+                    <span className="text-xs font-black text-foreground block mt-1.5 leading-none truncate">
+                      {currentHero.value1}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest block leading-none truncate">
+                      {currentHero.label2}
+                    </span>
+                    <span className="text-xs font-black text-orange-500 block mt-1.5 leading-none truncate">
+                      {currentHero.value2}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Dynamic Match Result Result */}
+                {currentHero.matchResult && (
+                  <p className="text-[10px] font-black text-amber-500/95 uppercase tracking-wide mb-3 px-1">
+                    🏆 {currentHero.matchResult}
+                  </p>
+                )}
+
+                {/* AI Story */}
+                <p className="text-xs text-muted-foreground leading-relaxed italic mb-4 bg-muted/20 border-l-2 border-orange-500/40 p-2.5 rounded-r-lg">
+                  {currentHero.story}
+                </p>
+
+                {/* Social Counters */}
+                <div className="flex justify-between items-center text-[10px] font-black text-muted-foreground/80 mb-4 px-1">
+                  <span className="flex items-center gap-1">
+                    <Heart className="h-3 w-3 text-orange-500 fill-orange-500" />
+                    {currentHero.appreciationCount} Appreciations
+                  </span>
+                  <span>Powered by CricLab</span>
+                </div>
+
+                {/* Actions Bar */}
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline"
+                    className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-bold py-2 px-3 rounded-xl border transition-all active:scale-97 cursor-pointer ${
+                      currentHero.userAppreciated
+                        ? "bg-orange-500/10 border-orange-500 text-orange-500 shadow-[0_0_12px_rgba(249,115,22,0.15)]"
+                        : "border-border hover:bg-muted text-foreground"
+                    }`}
+                    onClick={() => handleAppreciate(currentHero.type, currentHero.playerId, currentHero.playerName, currentHero.story)}
+                  >
+                    <span>👏</span> Appreciate{currentHero.userAppreciated && "d"}
+                  </Button>
+                  
+                  <Button 
+                    variant="outline"
+                    className="flex items-center justify-center gap-1.5 text-xs font-bold py-2 px-3 rounded-xl border border-border hover:bg-muted text-foreground shrink-0 cursor-pointer"
+                    onClick={() => triggerShare(currentHero)}
+                  >
+                    <Share2 className="h-3.5 w-3.5" /> Share
+                  </Button>
+                </div>
+              </Card>
+
+              {/* Left/Right Carousel Controls */}
+              <button 
+                onClick={prevSlide}
+                className="absolute left-1.5 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 border border-white/10 text-white/80 p-1.5 rounded-full backdrop-blur-sm shadow z-10 hover:text-white"
+                aria-label="Previous Hero"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button 
+                onClick={nextSlide}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 border border-white/10 text-white/80 p-1.5 rounded-full backdrop-blur-sm shadow z-10 hover:text-white"
+                aria-label="Next Hero"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+
+              {/* Dots indicator */}
+              <div className="flex justify-center gap-1.5 mt-3">
+                {heroData.map((_, idx) => (
+                  <span 
+                    key={idx}
+                    onClick={() => setCurrentIndex(idx)}
+                    className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
+                      idx === currentIndex ? "w-4 bg-orange-500" : "w-1.5 bg-muted-foreground/30"
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </section>
+
+        {/* Live Section */}
+        {isLoadingMatches ? (
+          <SectionSkeleton heightClass="h-28" />
+        ) : isErrorMatches ? (
+          <SectionError message="Failed to load Live matches." onRetry={refetchMatches} />
+        ) : (
+          <Section title="Live" items={live} isAdmin={role === "admin"} onDelete={onDelete} />
+        )}
+
+        {/* 🌟 Stars of the Month Section */}
+        <section className="space-y-3 mt-4">
+          <h2 className="text-xs font-black uppercase tracking-widest text-amber-500 flex items-center gap-1.5 px-1">
+            <Star className="h-4 w-4 text-amber-500 fill-amber-500 animate-pulse" /> Stars Of The Month
+          </h2>
+          
+          {isLoadingRankings ? (
+            <div className="space-y-2.5">
+              <SectionSkeleton heightClass="h-16" />
+              <SectionSkeleton heightClass="h-16" />
+              <SectionSkeleton heightClass="h-16" />
+            </div>
+          ) : isErrorRankings ? (
+            <SectionError message="Failed to load Stars Of The Month rankings." onRetry={refetchRankings} />
+          ) : rankings ? (
+            <div className="grid grid-cols-1 gap-2.5">
+              {rankings.mvp?.[0] && (
+                <Card className="p-3 border border-amber-500/25 bg-card dark:bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl shrink-0">🥇</span>
+                    <div className="h-10 w-10 rounded-full border border-amber-400 p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0">
+                      {rankings.mvp[0].avatar ? (
+                        <img src={rankings.mvp[0].avatar} alt={rankings.mvp[0].name} className="h-full w-full object-cover rounded-full" />
                       ) : (
-                        <span className="font-extrabold text-orange-500 text-lg">
-                          {currentHero.playerName.slice(0, 2).toUpperCase()}
+                        <span className="font-bold text-amber-500 text-xs">
+                          {rankings.mvp[0].name.slice(0, 2).toUpperCase()}
                         </span>
                       )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-black text-base text-foreground truncate hover:text-orange-500 transition-colors">
-                        <Link to="/players/$id" params={{ id: currentHero.playerId }}>
-                          {currentHero.playerName}
-                        </Link>
-                      </h3>
-                      <p className="text-[10px] text-muted-foreground font-black uppercase tracking-wider mt-0.5">
-                        {currentHero.teamName}
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-black text-foreground truncate">{rankings.mvp[0].name}</h4>
+                      <p className="text-[9px] text-muted-foreground uppercase font-extrabold tracking-wider truncate">
+                        {rankings.mvp[0].team_name || "Superstar"}
+                      </p>
+                      <div className="flex gap-2.5 mt-0.5 text-[9px] text-muted-foreground font-extrabold">
+                        <span>Runs: {rankings.mvp[0].runs}</span>
+                        <span>Wkts: {rankings.mvp[0].wickets}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-[8px] text-muted-foreground uppercase font-black tracking-widest block leading-none">MVP Score</span>
+                    <span className="text-base font-black text-amber-500 block mt-0.5 leading-none">{rankings.mvp[0].mvp}</span>
+                  </div>
+                </Card>
+              )}
+
+              {rankings.batters?.[0] && (
+                <Card className="p-3 border border-border/40 bg-card dark:bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl shrink-0">🥈</span>
+                    <div className="h-10 w-10 rounded-full border border-border p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0">
+                      {rankings.batters[0].avatar ? (
+                        <img src={rankings.batters[0].avatar} alt={rankings.batters[0].name} className="h-full w-full object-cover rounded-full" />
+                      ) : (
+                        <span className="font-bold text-primary text-xs">
+                          {rankings.batters[0].name.slice(0, 2).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-black text-foreground truncate">{rankings.batters[0].name}</h4>
+                      <p className="text-[9px] text-muted-foreground uppercase font-extrabold tracking-wider truncate">
+                        {rankings.batters[0].team_name || "Best Batter"}
+                      </p>
+                      <div className="flex gap-2.5 mt-0.5 text-[9px] text-muted-foreground font-extrabold">
+                        <span>S/R: {rankings.batters[0].sr}</span>
+                        <span>Sixes: {rankings.batters[0].sixes}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-[8px] text-muted-foreground uppercase font-black tracking-widest block leading-none">Total Runs</span>
+                    <span className="text-base font-black text-primary block mt-0.5 leading-none">{rankings.batters[0].runs}</span>
+                  </div>
+                </Card>
+              )}
+
+              {rankings.bowlers?.[0] && (
+                <Card className="p-3 border border-border/40 bg-card dark:bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl shrink-0">🥉</span>
+                    <div className="h-10 w-10 rounded-full border border-border p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0">
+                      {rankings.bowlers[0].avatar ? (
+                        <img src={rankings.bowlers[0].avatar} alt={rankings.bowlers[0].name} className="h-full w-full object-cover rounded-full" />
+                      ) : (
+                        <span className="font-bold text-purple-400 text-xs">
+                          {rankings.bowlers[0].name.slice(0, 2).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-black text-foreground truncate">{rankings.bowlers[0].name}</h4>
+                      <p className="text-[9px] text-muted-foreground uppercase font-extrabold tracking-wider truncate">
+                        {rankings.bowlers[0].team_name || "Best Bowler"}
                       </p>
                     </div>
                   </div>
-
-                  {/* Highlight Stats */}
-                  <div className="bg-muted/40 rounded-xl border border-border/20 p-3 mb-4 grid grid-cols-2 gap-3 text-center">
-                    <div className="min-w-0">
-                      <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest block leading-none truncate">
-                        {currentHero.label1}
-                      </span>
-                      <span className="text-xs font-black text-foreground block mt-1.5 leading-none truncate">
-                        {currentHero.value1}
-                      </span>
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest block leading-none truncate">
-                        {currentHero.label2}
-                      </span>
-                      <span className="text-xs font-black text-orange-500 block mt-1.5 leading-none truncate">
-                        {currentHero.value2}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Dynamic Match Result Result */}
-                  {currentHero.matchResult && (
-                    <p className="text-[10px] font-black text-amber-500/95 uppercase tracking-wide mb-3 px-1">
-                      🏆 {currentHero.matchResult}
-                    </p>
-                  )}
-
-                  {/* AI Story */}
-                  <p className="text-xs text-muted-foreground leading-relaxed italic mb-4 bg-muted/20 border-l-2 border-orange-500/40 p-2.5 rounded-r-lg">
-                    {currentHero.story}
-                  </p>
-
-                  {/* Social Counters */}
-                  <div className="flex justify-between items-center text-[10px] font-black text-muted-foreground/80 mb-4 px-1">
-                    <span className="flex items-center gap-1">
-                      <Heart className="h-3 w-3 text-orange-500 fill-orange-500" />
-                      {currentHero.appreciationCount} Appreciations
-                    </span>
-                    <span>Powered by CricLab</span>
-                  </div>
-
-                  {/* Actions Bar */}
-                  <div className="flex gap-2">
-                    <Button 
-                      variant="outline"
-                      className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-bold py-2 px-3 rounded-xl border transition-all active:scale-97 cursor-pointer ${
-                        currentHero.userAppreciated
-                          ? "bg-orange-500/10 border-orange-500 text-orange-500 shadow-[0_0_12px_rgba(249,115,22,0.15)]"
-                          : "border-border hover:bg-muted text-foreground"
-                      }`}
-                      onClick={() => handleAppreciate(currentHero.type, currentHero.playerId, currentHero.playerName, currentHero.story)}
-                    >
-                      <span>👏</span> Appreciate{currentHero.userAppreciated && "d"}
-                    </Button>
-                    
-                    <Button 
-                      variant="outline"
-                      className="flex items-center justify-center gap-1.5 text-xs font-bold py-2 px-3 rounded-xl border border-border hover:bg-muted text-foreground shrink-0 cursor-pointer"
-                      onClick={() => triggerShare(currentHero)}
-                    >
-                      <Share2 className="h-3.5 w-3.5" /> Share
-                    </Button>
+                  <div className="text-right shrink-0">
+                    <span className="text-[8px] text-muted-foreground uppercase font-black tracking-widest block leading-none">Wickets</span>
+                    <span className="text-base font-black text-purple-400 block mt-0.5 leading-none">{rankings.bowlers[0].wickets}</span>
                   </div>
                 </Card>
+              )}
+            </div>
+          ) : null}
+        </section>
 
-                {/* Left/Right Carousel Controls */}
-                <button 
-                  onClick={prevSlide}
-                  className="absolute left-1.5 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 border border-white/10 text-white/80 p-1.5 rounded-full backdrop-blur-sm shadow z-10 hover:text-white"
-                  aria-label="Previous Hero"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <button 
-                  onClick={nextSlide}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 border border-white/10 text-white/80 p-1.5 rounded-full backdrop-blur-sm shadow z-10 hover:text-white"
-                  aria-label="Next Hero"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-
-                {/* Dots indicator */}
-                <div className="flex justify-center gap-1.5 mt-3">
-                  {heroData.map((_, idx) => (
-                    <span 
-                      key={idx}
-                      onClick={() => setCurrentIndex(idx)}
-                      className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
-                        idx === currentIndex ? "w-4 bg-orange-500" : "w-1.5 bg-muted-foreground/30"
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </section>
-
-          {/* Live Section */}
-          <Section title="Live" items={live} isAdmin={role === "admin"} onDelete={onDelete} />
-
-          {/* 🌟 Stars of the Month Section */}
-          {rankings && (
-            <section className="space-y-3 mt-4">
-              <h2 className="text-xs font-black uppercase tracking-widest text-amber-500 flex items-center gap-1.5 px-1">
-                <Star className="h-4 w-4 text-amber-500 fill-amber-500 animate-pulse" /> Stars Of The Month
-              </h2>
-              
-              <div className="grid grid-cols-1 gap-2.5">
-                {rankings.mvp?.[0] && (
-                  <Card className="p-3 border border-amber-500/25 bg-card dark:bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl shrink-0">🥇</span>
-                      <div className="h-10 w-10 rounded-full border border-amber-400 p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0">
-                        {rankings.mvp[0].avatar ? (
-                          <img src={rankings.mvp[0].avatar} alt={rankings.mvp[0].name} className="h-full w-full object-cover rounded-full" />
-                        ) : (
-                          <span className="font-bold text-amber-500 text-xs">
-                            {rankings.mvp[0].name.slice(0, 2).toUpperCase()}
-                          </span>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-black text-foreground truncate">{rankings.mvp[0].name}</h4>
-                        <p className="text-[9px] text-muted-foreground uppercase font-extrabold tracking-wider truncate">
-                          {rankings.mvp[0].team_name || "Superstar"}
-                        </p>
-                        <div className="flex gap-2.5 mt-0.5 text-[9px] text-muted-foreground font-extrabold">
-                          <span>Runs: {rankings.mvp[0].runs}</span>
-                          <span>Wkts: {rankings.mvp[0].wickets}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <span className="text-[8px] text-muted-foreground uppercase font-black tracking-widest block leading-none">MVP Score</span>
-                      <span className="text-base font-black text-amber-500 block mt-0.5 leading-none">{rankings.mvp[0].mvp}</span>
-                    </div>
-                  </Card>
-                )}
-
-                {rankings.batters?.[0] && (
-                  <Card className="p-3 border border-border/40 bg-card dark:bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl shrink-0">🥈</span>
-                      <div className="h-10 w-10 rounded-full border border-border p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0">
-                        {rankings.batters[0].avatar ? (
-                          <img src={rankings.batters[0].avatar} alt={rankings.batters[0].name} className="h-full w-full object-cover rounded-full" />
-                        ) : (
-                          <span className="font-bold text-primary text-xs">
-                            {rankings.batters[0].name.slice(0, 2).toUpperCase()}
-                          </span>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-black text-foreground truncate">{rankings.batters[0].name}</h4>
-                        <p className="text-[9px] text-muted-foreground uppercase font-extrabold tracking-wider truncate">
-                          {rankings.batters[0].team_name || "Best Batter"}
-                        </p>
-                        <div className="flex gap-2.5 mt-0.5 text-[9px] text-muted-foreground font-extrabold">
-                          <span>S/R: {rankings.batters[0].sr}</span>
-                          <span>Sixes: {rankings.batters[0].sixes}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <span className="text-[8px] text-muted-foreground uppercase font-black tracking-widest block leading-none">Total Runs</span>
-                      <span className="text-base font-black text-primary block mt-0.5 leading-none">{rankings.batters[0].runs}</span>
-                    </div>
-                  </Card>
-                )}
-
-                {rankings.bowlers?.[0] && (
-                  <Card className="p-3 border border-border/40 bg-card dark:bg-slate-950/40 backdrop-blur-sm rounded-xl flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl shrink-0">🥉</span>
-                      <div className="h-10 w-10 rounded-full border border-border p-0.5 overflow-hidden bg-muted flex items-center justify-center shrink-0">
-                        {rankings.bowlers[0].avatar ? (
-                          <img src={rankings.bowlers[0].avatar} alt={rankings.bowlers[0].name} className="h-full w-full object-cover rounded-full" />
-                        ) : (
-                          <span className="font-bold text-purple-400 text-xs">
-                            {rankings.bowlers[0].name.slice(0, 2).toUpperCase()}
-                          </span>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-black text-foreground truncate">{rankings.bowlers[0].name}</h4>
-                        <p className="text-[9px] text-muted-foreground uppercase font-extrabold tracking-wider truncate">
-                          {rankings.bowlers[0].team_name || "Best Bowler"}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <span className="text-[8px] text-muted-foreground uppercase font-black tracking-widest block leading-none">Wickets</span>
-                      <span className="text-base font-black text-purple-400 block mt-0.5 leading-none">{rankings.bowlers[0].wickets}</span>
-                    </div>
-                  </Card>
-                )}
-              </div>
-            </section>
-          )}
-
-          {/* Past Section */}
+        {/* Past Section */}
+        {isLoadingMatches ? (
+          <SectionSkeleton heightClass="h-28" />
+        ) : isErrorMatches ? (
+          <SectionError message="Failed to load Past matches." onRetry={refetchMatches} />
+        ) : (
           <Section title="Past" items={past} isAdmin={role === "admin"} onDelete={onDelete} />
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Floating Reaction Emojis overlay */}
       <div className="fixed inset-0 pointer-events-none z-[99999] overflow-hidden">

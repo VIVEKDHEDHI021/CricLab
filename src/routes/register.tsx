@@ -15,7 +15,7 @@ export const Route = createFileRoute("/register")({
 });
 
 function RegisterPage() {
-  const { user, role, loading, refreshRole } = useAuth();
+  const { user, role, loading, refreshRole, setAuthUser } = useAuth();
   const nav = useNavigate();
 
   useEffect(() => {
@@ -66,10 +66,10 @@ function RegisterPage() {
 
     setBusy(true);
     try {
-      const { token } = await authService.register(name, mobile, username, password, confirm);
+      const { token, user: newUser } = await authService.register(name, mobile, username, password, confirm);
       setToken(token);
       updateEchoAuth();
-      await refreshRole();
+      setAuthUser(newUser);
       toast.success("Account created successfully!");
       nav({ to: "/setup" });
     } catch (err: any) {

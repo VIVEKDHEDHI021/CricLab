@@ -73,7 +73,7 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const nav = useNavigate();
-  const { refreshRole } = useAuth();
+  const { refreshRole, setAuthUser } = useAuth();
   const [gsiLoaded, setGsiLoaded] = useState(false);
 
   // Forgot password states
@@ -123,10 +123,10 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
         callback: async (response: any) => {
           setBusy(true);
           try {
-            const { token } = await authService.loginWithGoogle(response.credential);
+            const { token, user } = await authService.loginWithGoogle(response.credential);
             setToken(token);
             updateEchoAuth();
-            await refreshRole();
+            setAuthUser(user);
             toast.success("Signed in with Google");
             nav({ to: "/dashboard" });
           } catch (err: any) {
@@ -164,10 +164,10 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
     if (!mobile.trim() || !password) return toast.error("Mobile and password required");
     setBusy(true);
     try {
-      const { token } = await authService.login(mobile, password, expectedRole ?? "user");
+      const { token, user } = await authService.login(mobile, password, expectedRole ?? "user");
       setToken(token);
       updateEchoAuth();
-      await refreshRole();
+      setAuthUser(user);
       toast.success("Signed in");
       nav({ to: "/dashboard" });
     } catch (err: any) {
@@ -302,7 +302,7 @@ function AdminRegisterDialog() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const nav = useNavigate();
-  const { refreshRole } = useAuth();
+  const { refreshRole, setAuthUser } = useAuth();
   const [form, setForm] = useState({
     name: "",
     username: "",
@@ -325,7 +325,7 @@ function AdminRegisterDialog() {
     }
     setBusy(true);
     try {
-      const { token } = await authService.registerAdmin(
+      const { token, user } = await authService.registerAdmin(
         name,
         mobile,
         username,
@@ -335,7 +335,7 @@ function AdminRegisterDialog() {
       );
       setToken(token);
       updateEchoAuth();
-      await refreshRole();
+      setAuthUser(user);
       toast.success("Admin account created");
       setOpen(false);
       nav({ to: "/dashboard" });

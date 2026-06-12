@@ -159,6 +159,7 @@ class AuthController extends Controller
             'google_id' => $account->google_id,
             'email' => $account->email,
             'must_change_password' => $account->must_change_password,
+            'is_profile_setup_completed' => $this->isProfileSetupCompleted($account),
         ]);
     }
 
@@ -177,6 +178,16 @@ class AuthController extends Controller
                 'user_id' => $account->id,
             ]);
         }
+    }
+
+    private function isProfileSetupCompleted(Account $account): bool
+    {
+        $player = Player::where('user_id', $account->id)->first();
+        if (!$player) {
+            $player = Player::where('mobile', $account->mobile)->first();
+        }
+
+        return (bool) ($player && $player->role && $player->batting_style);
     }
 
     private function loginResponse(Account $account)
