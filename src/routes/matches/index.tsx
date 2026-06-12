@@ -15,7 +15,14 @@ export const Route = createFileRoute("/matches/")({ component: MatchesList });
 function MatchesList() {
   const { role } = useAuth();
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({ queryKey: ["matches"], queryFn: fetchMatchSummaries });
+  const { data, isLoading } = useQuery({
+    queryKey: ["matches"],
+    queryFn: fetchMatchSummaries,
+    refetchInterval: (query) => {
+      const matches = query.state.data as any[];
+      return matches?.some((m: any) => m.status === 'live') ? 5000 : false;
+    }
+  });
 
   // Scorers and admins can manage matches
   const canManage = role === "admin" || role === "scorer";

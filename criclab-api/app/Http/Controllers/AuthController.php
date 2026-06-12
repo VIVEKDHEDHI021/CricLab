@@ -15,41 +15,82 @@ class AuthController extends Controller
 {
     public function login(Request $request)
     {
-        $request->validate([
-            'mobile' => 'required|string',
-            'password' => 'required|string',
-            'expected_role' => 'required|string|in:admin,user,scorer',
+        Log::info("Login attempt initiated", [
+            'mobile' => $request->mobile,
+            'expected_role' => $request->expected_role,
+            'ip' => $request->ip()
         ]);
 
-        $mobile = AdminAccountService::normalizeMobile($request->mobile);
+        try {
+            $request->validate([
+                'mobile' => 'required|string',
+                'password' => 'required|string',
+                'expected_role' => 'required|string|in:admin,user,scorer',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            Log::warning("Login request validation failed", [
+                'mobile' => $request->mobile,
+                'errors' => $e->errors()
+            ]);
+            throw $e;
+        }
 
-        if (AdminAccountService::isBootstrapLogin($mobile, $request->password, $request->expected_role)) {
-            $account = AdminAccountService::ensureBootstrapAccount($mobile, $request->expected_role);
-            if ($account) {
-                return $this->loginResponse($account);
+        try {
+            $mobile = AdminAccountService::normalizeMobile($request->mobile);
+            Log::debug("Mobile number normalized", ['original' => $request->mobile, 'normalized' => $mobile]);
+
+            if (AdminAccountService::isBootstrapLogin($mobile, $request->password, $request->expected_role)) {
+                Log::info("Bootstrap login match found", ['mobile' => $mobile, 'role' => $request->expected_role]);
+                $account = AdminAccountService::ensureBootstrapAccount($mobile, $request->expected_role);
+                if ($account) {
+                    Log::info("Bootstrap login succeeded", ['user_id' => $account->id]);
+                    return $this->loginResponse($account);
+                }
             }
+
+            $account = Account::where('mobile', $mobile)->first();
+            Log::debug("User lookup complete", ['found' => $account !== null, 'mobile' => $mobile]);
+
+            if (!$account) {
+                Log::warning("Login failed: User not found in database", ['mobile' => $mobile]);
+                return response()->json(['message' => 'Invalid credentials.'], 401);
+            }
+
+            if (!Hash::check($request->password, $account->password)) {
+                Log::warning("Login failed: Password mismatch", ['user_id' => $account->id]);
+                return response()->json(['message' => 'Invalid credentials.'], 401);
+            }
+
+            if ($account->role !== $request->expected_role) {
+                $tabForRole = [
+                    'admin'  => 'Admin',
+                    'scorer' => 'Scorer',
+                    'user'   => 'User',
+                ];
+                $requiredTab = $tabForRole[$account->role] ?? ucfirst($account->role);
+
+                Log::warning("Login failed: Role mismatch", [
+                    'user_id' => $account->id,
+                    'actual_role' => $account->role,
+                    'expected_role' => $request->expected_role
+                ]);
+
+                return response()->json([
+                    'message' => "This account is a {$requiredTab}. Use the {$requiredTab} login tab, not " . ($tabForRole[$request->expected_role] ?? $request->expected_role) . '.',
+                ], 403);
+            }
+
+            Log::info("User credentials validated. Sending response.", ['user_id' => $account->id]);
+            return $this->loginResponse($account);
+
+        } catch (\Exception $e) {
+            Log::error("Unhandled exception during login process", [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'payload' => $request->except('password')
+            ]);
+            return response()->json(['message' => 'An internal server error occurred during login.'], 500);
         }
-
-        $account = Account::where('mobile', $mobile)->first();
-
-        if (!$account || !Hash::check($request->password, $account->password)) {
-            return response()->json(['message' => 'Invalid credentials.'], 401);
-        }
-
-        if ($account->role !== $request->expected_role) {
-            $tabForRole = [
-                'admin'  => 'Admin',
-                'scorer' => 'Scorer',
-                'user'   => 'User',
-            ];
-            $requiredTab = $tabForRole[$account->role] ?? ucfirst($account->role);
-
-            return response()->json([
-                'message' => "This account is a {$requiredTab}. Use the {$requiredTab} login tab, not " . ($tabForRole[$request->expected_role] ?? $request->expected_role) . '.',
-            ], 403);
-        }
-
-        return $this->loginResponse($account);
     }
 
     public function register(Request $request)
@@ -192,21 +233,31 @@ class AuthController extends Controller
 
     private function loginResponse(Account $account)
     {
-        $token = $account->createToken('criclab-token')->plainTextToken;
+        try {
+            $token = $account->createToken('criclab-token')->plainTextToken;
+            Log::info("Sanctum token successfully generated", ['user_id' => $account->id]);
 
-        return response()->json([
-            'token' => $token,
-            'user' => [
-                'id' => $account->id,
-                'name' => $account->name,
-                'username' => $account->username,
-                'mobile' => $account->mobile,
-                'role' => $account->role,
-                'google_id' => $account->google_id,
-                'email' => $account->email,
-                'must_change_password' => $account->must_change_password,
-            ],
-        ]);
+            return response()->json([
+                'token' => $token,
+                'user' => [
+                    'id' => $account->id,
+                    'name' => $account->name,
+                    'username' => $account->username,
+                    'mobile' => $account->mobile,
+                    'role' => $account->role,
+                    'google_id' => $account->google_id,
+                    'email' => $account->email,
+                    'must_change_password' => $account->must_change_password,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Sanctum token generation failed", [
+                'user_id' => $account->id,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['message' => 'Failed to initialize session.'], 500);
+        }
     }
 
     public function loginWithGoogle(Request $request)

@@ -239,6 +239,10 @@ function Dashboard() {
     queryKey: ["matches"],
     queryFn: fetchMatchSummaries,
     retry: 1,
+    refetchInterval: (query) => {
+      const matches = query.state.data as any[];
+      return matches?.some((m: any) => m.status === 'live') ? 5000 : false;
+    }
   });
   
   const { data: motd, isLoading: isLoadingMotd, isError: isErrorMotd, refetch: refetchMotd } = useQuery({

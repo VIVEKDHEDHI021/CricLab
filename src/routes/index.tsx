@@ -159,28 +159,73 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
     });
   };
 
+  const [retryCount, setRetryCount] = useState(0);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!mobile.trim() || !password) return toast.error("Mobile and password required");
+    if (!mobile.trim() || !password) {
+      console.warn("[Login] Auth blocked: missing credentials.");
+      return toast.error("Mobile and password required");
+    }
+
+    console.log(`[Login] Sign In button clicked. Role: ${expectedRole}. Attempt #${retryCount + 1}`);
+    console.log("[Login] Request initiation. Payload:", { mobile, expectedRole });
+    
     setBusy(true);
     try {
       const { token, user } = await authService.login(mobile, password, expectedRole ?? "user");
+      console.log("[Login] API response received successfully:", {
+        hasToken: !!token,
+        userId: user?.id,
+        role: user?.role
+      });
+      
       setToken(token);
       updateEchoAuth();
       setAuthUser(user);
-      toast.success("Signed in");
+      
+      toast.success("Signed in successfully!");
+      console.log("[Login] Attempting redirect to /dashboard...");
       nav({ to: "/dashboard" });
     } catch (err: any) {
-      const message = err.response?.data?.message || err.message || "Auth failed";
-      toast.error(message);
+      console.error("[Login] Exception occurred during auth flow:", err);
+      
+      let message = "Authentication failed. Please check your connection and try again.";
+      if (err.code === "ECONNABORTED" || err.message?.includes("timeout")) {
+        message = "Connection timed out. The backend API is taking too long to respond. Please try again.";
+      } else if (err.response) {
+        console.warn("[Login] API returned error status:", err.response.status, err.response.data);
+        message = err.response.data?.message || `Auth failed: ${err.response.statusText}`;
+      } else if (err.request) {
+        console.error("[Login] Network Error - no response received:", err.request);
+        message = "Network Error: Cannot connect to the server. Please check if your backend is online.";
+      } else {
+        message = err.message || message;
+      }
+      
+      toast.error(message, {
+        action: {
+          label: "Retry",
+          onClick: () => {
+            setRetryCount(prev => prev + 1);
+            setTimeout(() => {
+              const formEl = document.getElementById(`login-form-${expectedRole}`);
+              if (formEl) {
+                formEl.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+              }
+            }, 100);
+          }
+        }
+      });
     } finally {
+      console.log("[Login] Resetting loading state (busy = false)");
       setBusy(false);
     }
   };
 
   return (
     <div className="space-y-4">
-      <form onSubmit={submit} className="space-y-3">
+      <form id={`login-form-${expectedRole}`} onSubmit={submit} className="space-y-3">
         <div className="space-y-1">
           <Label htmlFor={`mobile-${expectedRole}`}>Mobile number</Label>
           <Input

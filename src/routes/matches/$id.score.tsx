@@ -569,6 +569,16 @@ function LiveScoring() {
     };
   }, [id]);
 
+  useEffect(() => {
+    return () => {
+      console.log("[LiveScoring] Unmounting scoring page. Invalidating queries...");
+      queryClient.invalidateQueries({ queryKey: ["match", id] });
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
+      queryClient.invalidateQueries({ queryKey: ["manOfTheDay"] });
+      queryClient.invalidateQueries({ queryKey: ["playerRankings"] });
+    };
+  }, [id, queryClient]);
+
   // Local Recalculation Engine & Expected positions helpers
   const recalculateLocalInnings = (ballsList: any[], inningsId: string) => {
     const innBalls = ballsList.filter((b) => b.innings_id === inningsId).sort((a, b) => a.ball_index - b.ball_index);
@@ -2669,7 +2679,11 @@ function LiveScoring() {
     <div className="bg-card border-b border-border/80 text-foreground py-3 px-4 flex items-center justify-between sticky top-0 z-20 shadow-md">
       <div className="flex items-center gap-3">
         <button
-          onClick={() => nav({ to: "/matches/$id", params: { id } })}
+          onClick={async () => {
+            queryClient.invalidateQueries({ queryKey: ["match", id] });
+            queryClient.invalidateQueries({ queryKey: ["matches"] });
+            nav({ to: "/matches/$id", params: { id } });
+          }}
           className="hover:bg-accent hover:text-accent-foreground p-1.5 rounded-full transition-colors cursor-pointer text-foreground"
           title="Back to Match"
         >

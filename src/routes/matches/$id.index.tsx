@@ -31,6 +31,10 @@ function MatchDetails() {
   const { data, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ["match", id],
     queryFn: () => matchService.getMatch(id),
+    refetchInterval: (query) => {
+      const matchData = query.state.data as any;
+      return matchData?.m?.status === 'live' ? 5000 : false;
+    }
   });
 
   const { m, teams, innings, players, balls } = (data || {}) as any;

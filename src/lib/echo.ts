@@ -6,9 +6,50 @@ if (typeof window !== 'undefined') {
   (window as any).Pusher = Pusher;
 }
 
-const host = import.meta.env.VITE_REVERB_HOST || (typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1');
-const port = import.meta.env.VITE_REVERB_PORT ? parseInt(import.meta.env.VITE_REVERB_PORT) : 8080;
-const scheme = import.meta.env.VITE_REVERB_SCHEME || 'http';
+const getFallbackHost = () => {
+  if (typeof window === 'undefined') return '127.0.0.1';
+  const apiVal = import.meta.env.VITE_API_URL;
+  if (apiVal) {
+    try {
+      const url = new URL(apiVal);
+      return url.hostname;
+    } catch (e) {
+      console.warn("Invalid VITE_API_URL for host parsing:", apiVal);
+    }
+  }
+  return window.location.hostname;
+};
+
+const getFallbackScheme = () => {
+  const apiVal = import.meta.env.VITE_API_URL;
+  if (apiVal) {
+    try {
+      const url = new URL(apiVal);
+      return url.protocol === 'https:' ? 'https' : 'http';
+    } catch {}
+  }
+  return 'http';
+};
+
+const getFallbackPort = (schemeVal: string) => {
+  if (import.meta.env.VITE_REVERB_PORT) {
+    return parseInt(import.meta.env.VITE_REVERB_PORT);
+  }
+  const apiVal = import.meta.env.VITE_API_URL;
+  if (apiVal) {
+    try {
+      const url = new URL(apiVal);
+      if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+        return url.protocol === 'https:' ? 443 : 80;
+      }
+    } catch {}
+  }
+  return 8080;
+};
+
+const host = import.meta.env.VITE_REVERB_HOST || getFallbackHost();
+const scheme = import.meta.env.VITE_REVERB_SCHEME || getFallbackScheme();
+const port = getFallbackPort(scheme);
 
 // Echo client instance helper
 const getEchoClient = () => {
