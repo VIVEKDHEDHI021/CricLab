@@ -1,5 +1,7 @@
+import { BallEventData } from './matchEngine';
+
 const DB_NAME = 'criclab_offline_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export interface BallEvent {
   id: string;
@@ -36,6 +38,16 @@ export type PendingDeletion = {
   matchId: string;
 };
 
+export interface LocalSyncQueueItem {
+  id: string;
+  event_uuid: string;
+  match_id: string;
+  status: 'pending' | 'synced' | 'failed';
+  attempts: number;
+  last_error?: string | null;
+  payload: BallEventData;
+}
+
 class IndexedDbService {
   private db: IDBDatabase | null = null;
 
@@ -56,6 +68,18 @@ class IndexedDbService {
         if (!db.objectStoreNames.contains('pending_deletions')) {
           db.createObjectStore('pending_deletions', { keyPath: 'id' });
         }
+        if (!db.objectStoreNames.contains('ball_events')) {
+          db.createObjectStore('ball_events', { keyPath: 'event_uuid' });
+        }
+        if (!db.objectStoreNames.contains('match_snapshots')) {
+          db.createObjectStore('match_snapshots', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('sync_queue')) {
+          db.createObjectStore('sync_queue', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('audit_logs')) {
+          db.createObjectStore('audit_logs', { keyPath: 'id' });
+        }
       };
 
       request.onsuccess = () => {
@@ -67,7 +91,159 @@ class IndexedDbService {
     });
   }
 
-  // Deliveries Operations
+  // BallEvents (CricEngine v2)
+  async saveBallEvent(event: BallEventData): Promise<void> {
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('ball_events', 'readwrite');
+      const store = tx.objectStore('ball_events');
+      const request = store.put(event);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getBallEvents(matchId: string): Promise<BallEventData[]> {
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('ball_events', 'readonly');
+      const store = tx.objectStore('ball_events');
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const all = request.result as BallEventData[];
+        const filtered = all.filter((e) => e.match_id === matchId)
+          .sort((a, b) => a.sequence_number - b.sequence_number);
+        resolve(filtered);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteBallEvent(eventUuid: string): Promise<void> {
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('ball_events', 'readwrite');
+      const store = tx.objectStore('ball_events');
+      const request = store.delete(eventUuid);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // Snapshots
+  async saveMatchSnapshot(snapshot: any): Promise<void> {
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('match_snapshots', 'readwrite');
+      const store = tx.objectStore('match_snapshots');
+      const request = store.put(snapshot);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getMatchSnapshots(matchId: string): Promise<any[]> {
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('match_snapshots', 'readonly');
+      const store = tx.objectStore('match_snapshots');
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const all = request.result as any[];
+        const filtered = all.filter((s) => s.match_id === matchId);
+        resolve(filtered);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // SyncQueue
+  async addToSyncQueue(item: LocalSyncQueueItem): Promise<void> {
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('sync_queue', 'readwrite');
+      const store = tx.objectStore('sync_queue');
+      const request = store.put(item);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getSyncQueue(matchId?: string): Promise<LocalSyncQueueItem[]> {
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('sync_queue', 'readonly');
+      const store = tx.objectStore('sync_queue');
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const all = request.result as LocalSyncQueueItem[];
+        if (matchId) {
+          resolve(all.filter((q) => q.match_id === matchId));
+        } else {
+          resolve(all);
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async removeFromSyncQueue(id: string): Promise<void> {
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('sync_queue', 'readwrite');
+      const store = tx.objectStore('sync_queue');
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // Audit Logs
+  async saveAuditLog(log: any): Promise<void> {
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('audit_logs', 'readwrite');
+      const store = tx.objectStore('audit_logs');
+      const request = store.put(log);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getAuditLogs(matchId: string): Promise<any[]> {
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('audit_logs', 'readonly');
+      const store = tx.objectStore('audit_logs');
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const all = request.result as any[];
+        resolve(all.filter((l) => l.match_id === matchId));
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getUnsyncedAuditLogs(matchId: string): Promise<any[]> {
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('audit_logs', 'readonly');
+      const store = tx.objectStore('audit_logs');
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const all = request.result as any[];
+        resolve(all.filter((l) => l.match_id === matchId && !l.synced));
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // Deliveries Operations (Legacy - for compatibility)
   async saveDelivery(delivery: BallEvent): Promise<void> {
     const db = await this.initDb();
     return new Promise((resolve, reject) => {
@@ -247,7 +423,43 @@ class IndexedDbService {
   async clearMatchData(matchId: string): Promise<void> {
     const db = await this.initDb();
     
-    // Clear deliveries
+    // Clear ball events
+    const ballEventsTx = db.transaction('ball_events', 'readwrite');
+    const ballEventsStore = ballEventsTx.objectStore('ball_events');
+    const ballEventsReq = ballEventsStore.getAll();
+    ballEventsReq.onsuccess = () => {
+      const items = (ballEventsReq.result as BallEventData[]).filter((e) => e.match_id === matchId);
+      items.forEach((item) => ballEventsStore.delete(item.event_uuid));
+    };
+
+    // Clear match snapshots
+    const snapshotsTx = db.transaction('match_snapshots', 'readwrite');
+    const snapshotsStore = snapshotsTx.objectStore('match_snapshots');
+    const snapshotsReq = snapshotsStore.getAll();
+    snapshotsReq.onsuccess = () => {
+      const items = (snapshotsReq.result as any[]).filter((s) => s.match_id === matchId);
+      items.forEach((item) => snapshotsStore.delete(item.id));
+    };
+
+    // Clear sync queue
+    const syncTx = db.transaction('sync_queue', 'readwrite');
+    const syncStore = syncTx.objectStore('sync_queue');
+    const syncReq = syncStore.getAll();
+    syncReq.onsuccess = () => {
+      const items = (syncReq.result as LocalSyncQueueItem[]).filter((q) => q.match_id === matchId);
+      items.forEach((item) => syncStore.delete(item.id));
+    };
+
+    // Clear audit logs
+    const auditTx = db.transaction('audit_logs', 'readwrite');
+    const auditStore = auditTx.objectStore('audit_logs');
+    const auditReq = auditStore.getAll();
+    auditReq.onsuccess = () => {
+      const items = (auditReq.result as any[]).filter((l) => l.match_id === matchId);
+      items.forEach((item) => auditStore.delete(item.id));
+    };
+
+    // Clear legacy deliveries
     const deliveriesTx = db.transaction('deliveries', 'readwrite');
     const deliveriesStore = deliveriesTx.objectStore('deliveries');
     const deliveriesReq = deliveriesStore.getAll();
@@ -256,7 +468,7 @@ class IndexedDbService {
       items.forEach((item) => deliveriesStore.delete(item.id));
     };
 
-    // Clear overs
+    // Clear legacy overs
     const oversTx = db.transaction('overs', 'readwrite');
     const oversStore = oversTx.objectStore('overs');
     const oversReq = oversStore.getAll();
@@ -265,7 +477,7 @@ class IndexedDbService {
       items.forEach((item) => oversStore.delete(item.id));
     };
 
-    // Clear pending_deletions
+    // Clear legacy pending_deletions
     const pdTx = db.transaction('pending_deletions', 'readwrite');
     const pdStore = pdTx.objectStore('pending_deletions');
     const pdReq = pdStore.getAll();

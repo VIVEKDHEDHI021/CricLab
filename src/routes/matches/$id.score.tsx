@@ -43,10 +43,12 @@ import {
   Flame,
   Trophy,
   Award,
+  History,
 } from "lucide-react";
 import { WinnerCelebrationOverlay } from "@/components/WinnerCelebrationOverlay";
 import { backupService } from "@/lib/services/backupService";
-import { indexedDbService, BallEvent } from "@/lib/services/indexedDbService";
+import { indexedDbService, BallEvent, LocalSyncQueueItem } from "@/lib/services/indexedDbService";
+import { matchEngine, BallEventData } from "@/lib/services/matchEngine";
 
 export const Route = createFileRoute("/matches/$id/score")({ component: LiveScoring });
 
@@ -201,14 +203,18 @@ function LiveScoring() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Optimistic UI & Sync states
-  const [localEvents, setLocalEvents] = useState<BallEvent[]>([]);
+  const [localEvents, setLocalEvents] = useState<BallEventData[]>([]);
   const [undoStates, setUndoStates] = useState<UndoState[]>([]);
   const [undoneBallIds, setUndoneBallIds] = useState<string[]>([]);
   const [activeExtraKind, setActiveExtraKind] = useState<"wide" | "no_ball" | "bye" | "leg_bye" | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [hasUnsyncedEvents, setHasUnsyncedEvents] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [actionLock, setActionLock] = useState(false);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
+  const [lastUndoTime, setLastUndoTime] = useState(0);
+  const correctionHistoryRef = useRef<number[]>([]);
+  const lastTapRef = useRef<{ inningsNo: number; ballIndex: number; action: string; timestamp: number } | null>(null);
 
   // Ball correction states
   const [editedBalls, setEditedBalls] = useState<Record<string, Partial<Ball>>>({});
@@ -384,10 +390,6 @@ function LiveScoring() {
   const [wicketType, setWicketType] = useState<string>("bowled");
   const [caughtById, setCaughtById] = useState<string>("");
   const [dismissedPlayerId, setDismissedPlayerId] = useState<string>("");
-  const [showAllOvers, setShowAllOvers] = useState(false);
-  const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
-
-  const canScore = role === "admin" || (user && serverMatch && serverMatch.created_by === user.id);
   const playerName = (pid: string) => players.find((p) => p.id === pid)?.name ?? "—";
 
   const [isLiveSync, setIsLiveSync] = useState(false);
@@ -489,15 +491,59 @@ function LiveScoring() {
       setInnings(data.innings ?? []);
       setPlayers(data.players ?? []);
       setBalls(data.balls ?? []);
-      
+      localStorage.setItem(`criclab_cached_match_data_${id}`, JSON.stringify(data));
+
+      try {
+        const serverEvts = await ballService.getEvents(id);
+        for (const e of serverEvts) {
+          await indexedDbService.saveBallEvent({
+            event_uuid: e.event_uuid,
+            event_type: e.event_type,
+            sequence_number: e.sequence_number,
+            match_id: e.match_id,
+            innings_no: e.innings_no,
+            over_no: e.over_no,
+            ball_no: e.ball_no,
+            striker_id: e.striker_id,
+            non_striker_id: e.non_striker_id,
+            bowler_id: e.bowler_id,
+            batting_team_id: e.batting_team_id,
+            bowling_team_id: e.bowling_team_id,
+            runs_off_bat: e.runs_off_bat,
+            extras: e.extras,
+            extra_type: e.extra_type,
+            wicket: e.wicket,
+            wicket_type: e.wicket_type,
+            dismissed_player_id: e.dismissed_player_id,
+            legal_delivery: e.legal_delivery,
+            scorer_id: e.scorer_id,
+            device_timestamp: e.device_timestamp,
+            metadata: typeof e.metadata === 'string' ? JSON.parse(e.metadata) : e.metadata
+          });
+        }
+      } catch (evtErr) {
+        console.warn("Could not pull match events from server:", evtErr);
+      }
+
       // Update React Query caches instantly
       queryClient.setQueryData(["match", id], data);
       queryClient.invalidateQueries({ queryKey: ["matches"] });
       queryClient.invalidateQueries({ queryKey: ["manOfTheDay"] });
       queryClient.invalidateQueries({ queryKey: ["playerRankings"] });
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message);
+      console.warn("Failed to load match online, recovering from local cache", err);
+      const cached = localStorage.getItem(`criclab_cached_match_data_${id}`);
+      if (cached) {
+        const data = JSON.parse(cached);
+        setMatch(data.m);
+        setTeams(data.teams ?? []);
+        setInnings(data.innings ?? []);
+        setPlayers(data.players ?? []);
+        setBalls(data.balls ?? []);
+      }
     } finally {
+      const dbEvents = await indexedDbService.getBallEvents(id);
+      setLocalEvents(dbEvents);
       setLoading(false);
     }
   };
@@ -513,17 +559,7 @@ function LiveScoring() {
     const channel = echoClient.channel(`matches.${id}`);
 
     channel.listen(".MatchUpdated", (data: any) => {
-      setMatch(data.m);
-      setTeams(data.teams ?? []);
-      setInnings(data.innings ?? []);
-      setPlayers(data.players ?? []);
-      setBalls(data.balls ?? []);
-      
-      // Update React Query caches instantly
-      queryClient.setQueryData(["match", id], data);
-      queryClient.invalidateQueries({ queryKey: ["matches"] });
-      queryClient.invalidateQueries({ queryKey: ["manOfTheDay"] });
-      queryClient.invalidateQueries({ queryKey: ["playerRankings"] });
+      reload();
     });
 
     return () => {
@@ -652,61 +688,47 @@ function LiveScoring() {
     return { striker: expectedStriker || "", nonStriker: expectedNonStriker || "" };
   };
 
-  // 5. Combine server balls with local events (optimistic view)
-  const combinedBalls = useMemo(() => {
-    let list = balls.filter((b) => !undoneBallIds.includes(b.id));
-    
-    localEvents.forEach((event) => {
-      if (!list.some((b) => b.ball_index === event.ballIndex && b.innings_id === event.inningsId)) {
-        list.push({
-          id: event.id,
-          match_id: event.matchId,
-          innings_id: event.inningsId,
-          ball_index: event.ballIndex,
-          over_number: event.overNumber,
-          ball_in_over: event.ballInOver,
-          batter_id: event.batterId,
-          non_striker_id: event.nonStrikerId,
-          bowler_id: event.bowlerId,
-          runs: event.runs,
-          extra_runs: event.extraRuns,
-          extra_type: event.extraType,
-          is_wicket: event.isWicket,
-          wicket_type: event.wicketType,
-          is_legal: event.isLegal,
-          caught_by_id: event.caughtById,
-          created_at: new Date(event.timestamp).toISOString(),
-        });
-      }
+  // 5. Replay local events using MatchEngine to rebuild match state
+  const derivedState = useMemo(() => {
+    if (!serverMatch) return null;
+    return matchEngine.replay(localEvents, {
+      id: serverMatch.id,
+      team_a_id: serverMatch.team_a_id,
+      team_b_id: serverMatch.team_b_id,
+      team_a_name: teams.find((t: any) => t.id === serverMatch.team_a_id)?.name || 'Team A',
+      team_b_name: teams.find((t: any) => t.id === serverMatch.team_b_id)?.name || 'Team B',
+      batting_first_id: serverMatch.batting_first_id,
+      overs: serverMatch.overs,
+      wide_run: serverMatch.wide_run,
+      noball_run: serverMatch.noball_run,
+      last_man_batting: serverMatch.last_man_batting,
+      squad_a_ids: serverMatch.squad_a_ids,
+      squad_b_ids: serverMatch.squad_b_ids
     });
-
-    // Apply local edits
-    list = list.map((b) => {
-      if (editedBalls[b.id]) {
-        return { ...b, ...editedBalls[b.id] };
-      }
-      return b;
-    });
-
-    list.sort((a, b) => a.ball_index - b.ball_index);
-
-    // Run recalculation for each innings
-    const uniqueInningsIds = Array.from(new Set(list.map((b) => b.innings_id)));
-    uniqueInningsIds.forEach((innId) => {
-      list = recalculateLocalInnings(list, innId);
-    });
-    
-    return list;
-  }, [balls, localEvents, undoneBallIds, editedBalls]);
-
+  }, [localEvents, serverMatch, teams]);
 
   const match = useMemo(() => {
     if (!serverMatch) return null;
     return {
       ...serverMatch,
       ...offlineMatchUpdates,
+      status: derivedState?.status ?? serverMatch.status,
+      result: derivedState?.result ?? serverMatch.result,
+      current_innings: derivedState?.current_innings ?? serverMatch.current_innings
     };
-  }, [serverMatch, offlineMatchUpdates]);
+  }, [serverMatch, offlineMatchUpdates, derivedState]);
+
+  const isMatchCompleted = useMemo(() => {
+    return derivedState?.status === 'past' || serverMatch?.status === 'past';
+  }, [derivedState, serverMatch]);
+
+  const canScore = useMemo(() => {
+    const isOwner = !!(user && serverMatch && serverMatch.created_by === user.id);
+    return (role === "admin" || isOwner) && !isMatchCompleted;
+  }, [role, user, serverMatch, isMatchCompleted]);
+
+  const [showAllOvers, setShowAllOvers] = useState(false);
+  const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
 
   const combinedInnings = useMemo(() => {
     const list = [...innings];
@@ -718,30 +740,62 @@ function LiveScoring() {
     return list;
   }, [innings, offlineInnings]);
 
+  const combinedBalls = useMemo(() => {
+    if (!derivedState) return [];
+    return derivedState.balls.map((b) => {
+      const inn = combinedInnings.find((i) => i.innings_no === b.innings_no);
+      return {
+        id: b.id,
+        innings_id: inn?.id || `local_inn_${b.innings_no}`,
+        match_id: id,
+        ball_index: b.ball_index,
+        over_number: b.over_number,
+        ball_in_over: b.ball_in_over,
+        batter_id: b.batter_id,
+        non_striker_id: b.non_striker_id,
+        bowler_id: b.bowler_id,
+        runs: b.runs,
+        extra_runs: b.extra_runs,
+        extra_type: b.extra_type,
+        is_wicket: b.is_wicket,
+        wicket_type: b.wicket_type,
+        is_legal: b.is_legal,
+        caught_by_id: b.caught_by_id,
+        created_at: new Date().toISOString()
+      };
+    });
+  }, [derivedState, combinedInnings]);
+
   // 6. Calculate optimistic Innings state
   const optimisticInnings = useMemo(() => {
     return combinedInnings.map((inn) => {
-      const innEvents = combinedBalls.filter((b) => b.innings_id === inn.id);
-      const runs = innEvents.reduce((sum, b) => sum + (b.runs ?? 0) + (b.extra_runs ?? 0), 0);
-      const wickets = innEvents.filter((b) => b.is_wicket).length;
-      const legal_balls = innEvents.filter((b) => b.is_legal).length;
-      const is_closed = inn.is_closed || offlineClosedInnings.includes(inn.id);
-      return {
-        ...inn,
-        runs,
-        wickets,
-        legal_balls,
-        is_closed,
-      };
+      const derivedInn = derivedState?.innings[inn.innings_no];
+      if (derivedInn) {
+        return {
+          ...inn,
+          runs: derivedInn.runs,
+          wickets: derivedInn.wickets,
+          legal_balls: derivedInn.legal_balls,
+          is_closed: derivedInn.is_closed,
+        };
+      }
+      return inn;
     });
-  }, [combinedInnings, combinedBalls, offlineClosedInnings]);
+  }, [combinedInnings, derivedState]);
 
-  const currentInn = useMemo(
-    () =>
-      optimisticInnings.find((i) => i.innings_no === match?.current_innings && !i.is_closed) ||
-      optimisticInnings[optimisticInnings.length - 1],
-    [optimisticInnings, match],
-  );
+  // Keep striker, nonStriker, and bowler synchronized with derived state
+  useEffect(() => {
+    if (derivedState) {
+      if (derivedState.active_striker) setStriker(derivedState.active_striker);
+      if (derivedState.active_non_striker) setNonStriker(derivedState.active_non_striker);
+      if (derivedState.active_bowler) setBowler(derivedState.active_bowler);
+    }
+  }, [derivedState]);
+
+  const currentInn = useMemo(() => {
+    return optimisticInnings.find((i) => i.innings_no === match?.current_innings && !i.is_closed) ||
+           optimisticInnings[optimisticInnings.length - 1];
+  }, [optimisticInnings, match]);
   const battingTeam = currentInn?.batting_team_id;
   const bowlingTeam = currentInn?.bowling_team_id;
   const battingPlayers = players.filter((p) => p.team_id === battingTeam);
@@ -750,106 +804,139 @@ function LiveScoring() {
     return combinedBalls.filter((b) => b.innings_id === currentInn?.id);
   }, [combinedBalls, currentInn]);
 
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [showAuditTrail, setShowAuditTrail] = useState(false);
+
+  const logAudit = async (
+    actionType: 'score' | 'correct' | 'undo' | 'sync_attempt' | 'sync_failure',
+    description: string,
+    eventUuid?: string | null,
+    oldState?: any,
+    newState?: any
+  ) => {
+    const logId = crypto.randomUUID ? crypto.randomUUID() : `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const newLog = {
+      id: logId,
+      match_id: id,
+      event_uuid: eventUuid || null,
+      action_type: actionType,
+      user_id: user?.id || null,
+      description,
+      old_state: oldState || null,
+      new_state: newState || null,
+      device_timestamp: Date.now(),
+      synced: false
+    };
+    try {
+      await indexedDbService.saveAuditLog(newLog);
+      const localLogs = await indexedDbService.getAuditLogs(id);
+      try {
+        const serverLogs = await matchService.getAuditLogs(id);
+        const merged = [...serverLogs];
+        localLogs.forEach((ll) => {
+          if (!merged.some((sl) => sl.id === ll.id)) {
+            merged.push(ll);
+          }
+        });
+        setAuditLogs(merged.sort((a, b) => b.device_timestamp - a.device_timestamp));
+      } catch {
+        setAuditLogs(localLogs.sort((a, b) => b.device_timestamp - a.device_timestamp));
+      }
+    } catch (err) {
+      console.error("Failed to save audit log", err);
+    }
+  };
+
   // 3. Load local data from IndexedDB
   const loadLocalData = async () => {
-    if (currentInn) {
-      const dbBalls = await indexedDbService.getDeliveries(id, currentInn.innings_no);
-      setLocalEvents(dbBalls);
+    const dbEvents = await indexedDbService.getBallEvents(id);
+    setLocalEvents(dbEvents);
+    const queue = await indexedDbService.getSyncQueue(id);
+    setHasUnsyncedEvents(queue.some((q) => q.status === 'pending'));
+
+    try {
+      const serverLogs = await matchService.getAuditLogs(id);
+      const localLogs = await indexedDbService.getAuditLogs(id);
+      const merged = [...serverLogs];
+      localLogs.forEach((ll) => {
+        if (!merged.some((sl) => sl.id === ll.id)) {
+          merged.push(ll);
+        }
+      });
+      setAuditLogs(merged.sort((a, b) => b.device_timestamp - a.device_timestamp));
+    } catch {
+      const localLogs = await indexedDbService.getAuditLogs(id);
+      setAuditLogs(localLogs.sort((a, b) => b.device_timestamp - a.device_timestamp));
     }
   };
 
   useEffect(() => {
     loadLocalData();
-  }, [currentInn?.id]);
+  }, []);
 
-  // 4. Over-Based Background Sync Engine
-  const syncPendingData = async () => {
+  // 4. Events Log-Based Background Sync Engine
+  const syncPendingEvents = async () => {
     if (syncing) return;
     setSyncing(true);
     setSyncError(null);
     try {
-      // 1. Process pending deletions first
-      const pendingDeletions = await indexedDbService.getPendingDeletions(id);
-      for (const pd of pendingDeletions) {
+      const queue = await indexedDbService.getSyncQueue(id);
+      const pending = queue.filter(q => q.status === 'pending');
+
+      if (pending.length > 0) {
+        await logAudit('sync_attempt', `Attempting to sync ${pending.length} pending scoring event(s) to backend.`);
+
+        const eventsToSync = pending.map(p => p.payload);
         try {
-          await ballService.undoBall(pd.id);
-          await indexedDbService.removePendingDeletion(pd.id);
-        } catch (err: any) {
-          if (err.response?.status === 404 || err.response?.status === 422) {
-            await indexedDbService.removePendingDeletion(pd.id);
-          } else {
-            throw err;
+          await ballService.syncEvents(id, eventsToSync);
+          for (const item of pending) {
+            await indexedDbService.removeFromSyncQueue(item.id);
           }
+        } catch (err: any) {
+          console.error("Batch sync failed", err);
+          await logAudit('sync_failure', `Sync failed: ${err.message || "Network error"}`);
+          for (const item of pending) {
+            item.attempts++;
+            item.status = item.attempts >= 5 ? 'failed' : 'pending';
+            item.last_error = err.message || "Network error";
+            await indexedDbService.addToSyncQueue(item);
+          }
+          throw err;
         }
       }
 
-      // 2. Fetch match sync status from the server
-      const status = await ballService.syncStatus(id);
-
-      // 3. Process pending overs
-      if (currentInn) {
-        const localOvers = await indexedDbService.getOvers(id, currentInn.innings_no);
-        const pendingOvers = localOvers.filter((o) => o.status === 'PENDING');
-
-        for (const po of pendingOvers) {
-          const isAlreadySyncedOnServer = status.synced_overs.some(
-            (so) => so.innings_no === po.inningsNo && so.over_no === po.overNo
-          );
-
-          if (isAlreadySyncedOnServer) {
-            await indexedDbService.saveOverStatus(id, po.inningsNo, po.overNo, 'SYNCED');
-            continue;
+      // Sync unsynced audit logs
+      const unsyncedLogs = await indexedDbService.getUnsyncedAuditLogs(id);
+      if (unsyncedLogs.length > 0) {
+        try {
+          await matchService.syncAuditLogs(id, unsyncedLogs.map(({ synced, ...rest }) => rest));
+          for (const log of unsyncedLogs) {
+            await indexedDbService.saveAuditLog({ ...log, synced: true });
           }
-
-          const allDelivs = await indexedDbService.getDeliveries(id, po.inningsNo);
-          const overDelivs = allDelivs.filter((d) => d.overNumber === po.overNo);
-
-          if (overDelivs.length === 0) {
-            continue;
-          }
-
-          const payload = {
-            innings_no: po.inningsNo,
-            over_no: po.overNo,
-            bowler_id: overDelivs[0].bowlerId,
-            deliveries: overDelivs.map((d) => ({
-              id: d.id,
-              ball_index: d.ballIndex,
-              ball_in_over: d.ballInOver,
-              batter_id: d.batterId,
-              non_striker_id: d.nonStrikerId,
-              runs: d.runs,
-              extra_runs: d.extraRuns,
-              extra_type: d.extraType,
-              is_wicket: d.isWicket,
-              wicket_type: d.wicketType,
-              is_legal: d.isLegal,
-              caught_by_id: d.caughtById,
-            })),
-          };
-
-          try {
-            await ballService.syncOver(id, payload);
-            await indexedDbService.saveOverStatus(id, po.inningsNo, po.overNo, 'SYNCED');
-
-            const delIds = overDelivs.map((d) => d.id);
-            await indexedDbService.markDeliveriesSynced(delIds);
-          } catch (err: any) {
-            if (err.response?.status === 422) {
-              toast.error(err.response?.data?.message || "Sync Validation Error");
-              await indexedDbService.deleteOverStatus(id, po.inningsNo, po.overNo);
-              for (const d of overDelivs) {
-                await indexedDbService.deleteDelivery(d.id);
-              }
-              await loadLocalData();
-            } else {
-              throw err;
-            }
-          }
+        } catch (err) {
+          console.error("Failed to sync audit logs", err);
         }
       }
 
       await reload();
+      const updatedQueue = await indexedDbService.getSyncQueue(id);
+      setHasUnsyncedEvents(updatedQueue.some((q) => q.status === 'pending'));
+
+      // Reload merged audit logs
+      try {
+        const serverLogs = await matchService.getAuditLogs(id);
+        const localLogs = await indexedDbService.getAuditLogs(id);
+        const merged = [...serverLogs];
+        localLogs.forEach((ll) => {
+          if (!merged.some((sl) => sl.id === ll.id)) {
+            merged.push(ll);
+          }
+        });
+        setAuditLogs(merged.sort((a, b) => b.device_timestamp - a.device_timestamp));
+      } catch {
+        const localLogs = await indexedDbService.getAuditLogs(id);
+        setAuditLogs(localLogs.sort((a, b) => b.device_timestamp - a.device_timestamp));
+      }
     } catch (err: any) {
       console.error("Sync loop failed", err);
       setSyncError(err.message || "Network Error");
@@ -860,7 +947,7 @@ function LiveScoring() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      syncPendingData();
+      syncPendingEvents();
     }, 5000);
 
     return () => clearInterval(interval);
@@ -873,53 +960,64 @@ function LiveScoring() {
     const isWicket = editIsWicket;
     const isLegal = !["wide", "no_ball"].includes(editExtraType);
 
-    const payload = {
-      batter_id: editBatterId,
-      non_striker_id: editingBall.non_striker_id,
-      bowler_id: editBowlerId,
-      runs: editRuns,
-      extra_runs: editExtraType === "none" ? 0 : editExtraRuns,
-      extra_type: editExtraType === "none" ? null : editExtraType,
-      is_wicket: isWicket,
+    const corrUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
+    const corrEvent: BallEventData = {
+      event_uuid: corrUuid,
+      event_type: 'CORRECTION_EVENT',
+      sequence_number: nextSeq,
+      match_id: id,
+      innings_no: editingBall.innings_no,
+      runs_off_bat: editRuns,
+      extras: editExtraType === "none" ? 0 : editExtraRuns,
+      extra_type: editExtraType === "none" ? null : editExtraType as any,
+      wicket: isWicket,
       wicket_type: isWicket ? editWicketType : null,
-      is_legal: isLegal,
-      caught_by_id: (isWicket && editWicketType === "caught") ? editCaughtById || null : null,
+      dismissed_player_id: isWicket ? editBatterId : null,
+      legal_delivery: isLegal,
+      scorer_id: user?.id || null,
+      device_timestamp: Date.now(),
+      metadata: {
+        target_event_uuid: editingBall.id,
+        striker_id: editBatterId,
+        non_striker_id: editingBall.non_striker_id || null,
+        bowler_id: editBowlerId,
+        runs_off_bat: editRuns,
+        extras: editExtraType === "none" ? 0 : editExtraRuns,
+        extra_type: editExtraType === "none" ? null : editExtraType as any,
+        wicket: isWicket,
+        wicket_type: isWicket ? editWicketType : null,
+        dismissed_player_id: isWicket ? editBatterId : null,
+        legal_delivery: isLegal,
+        caught_by_id: (isWicket && editWicketType === "caught") ? editCaughtById || null : null
+      }
     };
 
     try {
-      setEditedBalls((prev) => ({
-        ...prev,
-        [editingBall.id]: {
-          ...editingBall,
-          ...payload,
-        },
-      }));
-
       setIsEditBallOpen(false);
-
-      await ballService.updateBall(editingBall.id, payload);
+      await indexedDbService.saveBallEvent(corrEvent);
+      await indexedDbService.addToSyncQueue({
+        id: corrUuid,
+        event_uuid: corrUuid,
+        match_id: id,
+        status: 'pending',
+        attempts: 0,
+        payload: corrEvent
+      });
+      const batterName = playerName(editBatterId) || 'Unknown';
+      const bowlerName = playerName(editBowlerId) || 'Unknown';
+      await logAudit(
+        'correct',
+        `Corrected ball: runs=${editRuns}, extra_runs=${editExtraRuns}, extra_type=${editExtraType}, wicket=${isWicket ? 'yes' : 'no'} (${editWicketType || 'none'}) by batter ${batterName} off bowler ${bowlerName}`,
+        corrUuid,
+        editingBall,
+        corrEvent
+      );
       toast.success("Ball updated successfully");
-
-      await reload();
-
-      // Update striker/non-striker positions
-      const updatedBalls = combinedBalls.map((b) => (b.id === editingBall.id ? { ...b, ...payload } : b));
-      const uniqueInningsIds = Array.from(new Set(updatedBalls.map((b) => b.innings_id)));
-      let recalculatedList = updatedBalls;
-      uniqueInningsIds.forEach((innId) => {
-        recalculatedList = recalculateLocalInnings(recalculatedList, innId);
-      });
-      if (currentInn) {
-        const expected = getExpectedStrikerNonStriker(recalculatedList, currentInn.id);
-        if (expected.striker) setStriker(expected.striker);
-        if (expected.nonStriker) setNonStriker(expected.nonStriker);
-      }
+      const updated = await indexedDbService.getBallEvents(id);
+      setLocalEvents(updated);
+      syncPendingEvents();
     } catch (err: any) {
-      setEditedBalls((prev) => {
-        const next = { ...prev };
-        delete next[editingBall.id];
-        return next;
-      });
       toast.error(err.response?.data?.message || err.message || "Failed to update ball");
     } finally {
       setIsSavingEdit(false);
@@ -931,28 +1029,41 @@ function LiveScoring() {
     if (!confirm("Are you sure you want to delete this ball? This will recalculate the entire innings.")) return;
 
     setIsSavingEdit(true);
-    try {
-      setUndoneBallIds((prev) => [...prev, editingBall.id]);
-      setIsEditBallOpen(false);
-
-      await ballService.undoBall(editingBall.id);
-      toast.success("Ball deleted successfully");
-
-      await reload();
-
-      const updatedBalls = combinedBalls.filter((b) => b.id !== editingBall.id);
-      const uniqueInningsIds = Array.from(new Set(updatedBalls.map((b) => b.innings_id)));
-      let recalculatedList = updatedBalls;
-      uniqueInningsIds.forEach((innId) => {
-        recalculatedList = recalculateLocalInnings(recalculatedList, innId);
-      });
-      if (currentInn) {
-        const expected = getExpectedStrikerNonStriker(recalculatedList, currentInn.id);
-        if (expected.striker) setStriker(expected.striker);
-        if (expected.nonStriker) setNonStriker(expected.nonStriker);
+    const undoUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
+    const undoEvent: BallEventData = {
+      event_uuid: undoUuid,
+      event_type: 'UNDO_EVENT',
+      sequence_number: nextSeq,
+      match_id: id,
+      innings_no: editingBall.innings_no,
+      runs_off_bat: 0,
+      extras: 0,
+      wicket: false,
+      legal_delivery: true,
+      scorer_id: user?.id || null,
+      device_timestamp: Date.now(),
+      metadata: {
+        target_event_uuid: editingBall.id
       }
+    };
+
+    try {
+      setIsEditBallOpen(false);
+      await indexedDbService.saveBallEvent(undoEvent);
+      await indexedDbService.addToSyncQueue({
+        id: undoUuid,
+        event_uuid: undoUuid,
+        match_id: id,
+        status: 'pending',
+        attempts: 0,
+        payload: undoEvent
+      });
+      toast.success("Ball deleted successfully");
+      const updated = await indexedDbService.getBallEvents(id);
+      setLocalEvents(updated);
+      syncPendingEvents();
     } catch (err: any) {
-      setUndoneBallIds((prev) => prev.filter((id) => id !== editingBall.id));
       toast.error(err.response?.data?.message || err.message || "Failed to delete ball");
     } finally {
       setIsSavingEdit(false);
@@ -1226,18 +1337,22 @@ function LiveScoring() {
   }, [innBalls]);
 
   const activeBattersStats = useMemo(() => {
-    const list: { name: string; sr: string }[] = [];
+    const list: { id: string; name: string; runs: number; balls: number; fours: number; sixes: number; sr: string; isStriker: boolean }[] = [];
     if (striker) {
       const sBalls = innBalls.filter(b => b.batter_id === striker && b.extra_type !== "wide");
       const sRuns = sBalls.reduce((sum, b) => sum + (b.runs ?? 0), 0);
+      const fours = sBalls.filter(b => b.runs === 4).length;
+      const sixes = sBalls.filter(b => b.runs === 6).length;
       const sr = sBalls.length > 0 ? ((sRuns / sBalls.length) * 100).toFixed(1) : "0.0";
-      list.push({ name: playerName(striker), sr });
+      list.push({ id: striker, name: playerName(striker), runs: sRuns, balls: sBalls.length, fours, sixes, sr, isStriker: true });
     }
     if (nonStriker) {
       const nsBalls = innBalls.filter(b => b.batter_id === nonStriker && b.extra_type !== "wide");
       const nsRuns = nsBalls.reduce((sum, b) => sum + (b.runs ?? 0), 0);
+      const fours = nsBalls.filter(b => b.runs === 4).length;
+      const sixes = nsBalls.filter(b => b.runs === 6).length;
       const sr = nsBalls.length > 0 ? ((nsRuns / nsBalls.length) * 100).toFixed(1) : "0.0";
-      list.push({ name: playerName(nonStriker), sr });
+      list.push({ id: nonStriker, name: playerName(nonStriker), runs: nsRuns, balls: nsBalls.length, fours, sixes, sr, isStriker: false });
     }
     return list;
   }, [innBalls, striker, nonStriker, players]);
@@ -1251,8 +1366,9 @@ function LiveScoring() {
     }, 0);
     const legalBalls = bBalls.filter(b => b.is_legal).length;
     const econ = legalBalls > 0 ? ((runsConceded / legalBalls) * 6).toFixed(2) : "0.00";
-    const wickets = bBalls.filter(b => b.is_wicket && b.wicket_type !== "run_out").length;
-    return { name: playerName(bowler), econ, wickets };
+    const wickets = bBalls.filter(b => b.is_wicket && b.wicket_type !== "run_out" && b.wicket_type !== "retired_hurt").length;
+    const oversBowled = `${Math.floor(legalBalls / 6)}.${legalBalls % 6}`;
+    return { name: playerName(bowler), overs: oversBowled, runs: runsConceded, wickets, econ };
   }, [innBalls, bowler, players]);
 
   const secondInningsInfo = useMemo(() => {
@@ -1622,16 +1738,53 @@ function LiveScoring() {
       resultStr = winnerCelebration?.margin || 'Match Completed';
     }
 
+    // 1. Create and log MATCH_ENDED event locally to keep offline-first timeline intact
+    const endUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
+    const matchEndedEvent: BallEventData = {
+      event_uuid: endUuid,
+      event_type: 'MATCH_ENDED',
+      sequence_number: nextSeq,
+      match_id: id,
+      innings_no: currentInn?.innings_no || 1,
+      runs_off_bat: 0,
+      extras: 0,
+      wicket: false,
+      legal_delivery: true,
+      scorer_id: user?.id || null,
+      device_timestamp: Date.now(),
+      metadata: {
+        result: resultStr
+      }
+    };
+
     try {
-      const data = await matchService.endMatch(id);
-      toast.success(data.result || "Match finished!");
+      await indexedDbService.saveBallEvent(matchEndedEvent);
+      await indexedDbService.addToSyncQueue({
+        id: endUuid,
+        event_uuid: endUuid,
+        match_id: id,
+        status: 'pending',
+        attempts: 0,
+        payload: matchEndedEvent
+      });
+      const updated = await indexedDbService.getBallEvents(id);
+      setLocalEvents(updated);
+    } catch (err) {
+      console.error("Failed to save match ended event locally:", err);
+    }
+
+    // 2. Sync events to update the server and refresh query cache
+    try {
+      await syncPendingEvents();
+      toast.success("Match completed and synced successfully!");
       queryClient.invalidateQueries({ queryKey: ["match", id] });
       queryClient.invalidateQueries({ queryKey: ["matches"] });
       queryClient.invalidateQueries({ queryKey: ["manOfTheDay"] });
       queryClient.invalidateQueries({ queryKey: ["playerRankings"] });
     } catch (err: any) {
-      console.warn("Failed to sync match end to server:", err);
-      toast.warning("Server synchronization failed, match marked completed locally.");
+      console.warn("Failed to sync match end immediately, saved offline:", err);
+      toast.warning("Match completed offline. It will be synced when online.");
     }
 
     // Cache the completed match details locally before exporting
@@ -1716,6 +1869,47 @@ function LiveScoring() {
     }
   };
 
+  const checkCriticalConfirmation = (isLegal: boolean, runsScored: number, isWicket: boolean): boolean => {
+    if (!derivedState || !match) return true;
+
+    const currentInn = derivedState.innings[derivedState.current_innings];
+    if (!currentInn) return true;
+
+    const currentWickets = currentInn.wickets;
+    const maxWickets = battingPlayers.length > 0
+      ? (match.last_man_batting ? battingPlayers.length : battingPlayers.length - 1)
+      : 10;
+    
+    const isLastWicket = isWicket && (currentWickets + 1 >= maxWickets);
+    const isLastBallOfOvers = isLegal && (currentInn.legal_balls + 1 >= match.overs * 6);
+
+    // Innings 1 check
+    if (derivedState.current_innings === 1) {
+      if (isLastWicket || isLastBallOfOvers) {
+        return window.confirm("This delivery will end the first innings. Confirm scoring?");
+      }
+    }
+
+    // Innings 2 check
+    if (derivedState.current_innings === 2) {
+      // Find target runs (First innings runs + 1)
+      const inn1 = derivedState.innings[1];
+      if (inn1) {
+        const target = inn1.runs + 1;
+        const willReachTarget = currentInn.runs + runsScored >= target;
+        
+        if (willReachTarget) {
+          return window.confirm("This is the winning ball and will complete the match. Confirm scoring?");
+        }
+        if (isLastWicket || isLastBallOfOvers) {
+          return window.confirm("This delivery will end the match. Confirm scoring?");
+        }
+      }
+    }
+
+    return true;
+  };
+
   const handleWicketClick = () => {
     if (!currentInn) return toast.error("Start an innings first");
 
@@ -1732,10 +1926,6 @@ function LiveScoring() {
 
   const executeWicketBall = async (wType: string, dismissedId: string, caughtByPlayerId?: string) => {
     if (actionLock || cooldownRemaining > 0) return;
-    setActionLock(true);
-    setTimeout(() => setActionLock(false), 350);
-    setCooldownRemaining(3);
-
     setIsWicketDialogOpen(false);
     if (!currentInn) return toast.error("Start an innings first");
 
@@ -1743,6 +1933,15 @@ function LiveScoring() {
     if (!isSoloPlay && !isLastManActive && (!nonStriker || nonStriker === striker)) {
       return toast.error("Select a distinct non-striker");
     }
+
+    // Critical Event Confirmation
+    if (!checkCriticalConfirmation(true, 0, true)) {
+      return;
+    }
+
+    setActionLock(true);
+    setTimeout(() => setActionLock(false), 350);
+    setCooldownRemaining(3);
 
     const actualBatterId = dismissedId;
     const actualNonStrikerId = dismissedId === striker ? nonStriker : striker;
@@ -1752,39 +1951,51 @@ function LiveScoring() {
     const overNo = Math.floor(legalCount / 6);
     const ballInOver = (legalCount % 6) + 1;
 
-    const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    // Capture state snapshot before modifying state
-    const stateSnapshot: UndoState = {
-      inningsId: currentInn.id,
-      ballIndex,
-      striker,
-      nonStriker,
-      bowler,
-      isSoloPlay,
-    };
-    setUndoStates((prev) => [...prev, stateSnapshot]);
-
-    const newEvent: BallEvent = {
-      id: localId,
-      matchId: id,
-      inningsId: currentInn.id,
+    // Accidental duplicate tap protection
+    const now = Date.now();
+    const actionKey = `wicket_${wType}`;
+    if (lastTapRef.current &&
+        lastTapRef.current.inningsNo === currentInn.innings_no &&
+        lastTapRef.current.ballIndex === ballIndex &&
+        lastTapRef.current.action === actionKey &&
+        (now - lastTapRef.current.timestamp) < 300) {
+      console.warn("Accidental duplicate tap rejected.");
+      return;
+    }
+    lastTapRef.current = {
       inningsNo: currentInn.innings_no,
       ballIndex,
-      overNumber: overNo,
-      ballInOver,
-      batterId: actualBatterId,
-      nonStrikerId: isSoloPlay || isLastManActive ? null : actualNonStrikerId,
-      bowlerId: bowler,
-      runs: 0,
-      extraRuns: 0,
-      extraType: null,
-      isWicket: true,
-      wicketType: wType,
-      isLegal: true,
-      caughtById: wType === "caught" ? caughtByPlayerId || null : null,
-      timestamp: Date.now(),
-      synced: false,
+      action: actionKey,
+      timestamp: now
+    };
+
+    const eventUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
+    const newEvent: BallEventData = {
+      event_uuid: eventUuid,
+      event_type: 'BALL_EVENT',
+      sequence_number: nextSeq,
+      match_id: id,
+      innings_no: currentInn.innings_no,
+      over_no: overNo,
+      ball_no: ballInOver,
+      striker_id: actualBatterId,
+      non_striker_id: isSoloPlay || isLastManActive ? null : actualNonStrikerId,
+      bowler_id: bowler,
+      batting_team_id: currentInn.batting_team_id,
+      bowling_team_id: currentInn.bowling_team_id,
+      runs_off_bat: 0,
+      extras: 0,
+      extra_type: null,
+      wicket: true,
+      wicket_type: wType,
+      dismissed_player_id: actualBatterId,
+      legal_delivery: true,
+      scorer_id: user?.id || null,
+      device_timestamp: now,
+      metadata: {
+        caught_by_id: wType === "caught" ? caughtByPlayerId || null : null
+      }
     };
 
     const bowlerBallsBefore = innBalls.filter((b) => b.bowler_id === bowler);
@@ -1848,18 +2059,30 @@ function LiveScoring() {
 
     // Save event locally
     (async () => {
-      await indexedDbService.saveDelivery({
-        ...newEvent,
-        inningsNo: currentInn.innings_no
+      await indexedDbService.saveBallEvent(newEvent);
+      await indexedDbService.addToSyncQueue({
+        id: eventUuid,
+        event_uuid: eventUuid,
+        match_id: id,
+        status: 'pending',
+        attempts: 0,
+        payload: newEvent
       });
-      if (newLegal % 6 === 0) {
-        await indexedDbService.saveOverStatus(id, currentInn.innings_no, newEvent.overNumber, 'PENDING');
-        syncPendingData();
-      }
+      const dismissedName = playerName(dismissedId) || 'Unknown';
+      const bowlerName = playerName(bowler) || 'Unknown';
+      await logAudit(
+        'score',
+        `Wicket: ${wType.toUpperCase()} - ${dismissedName} dismissed off bowler ${bowlerName}`,
+        eventUuid,
+        null,
+        newEvent
+      );
       loadLocalData();
+      syncPendingEvents();
     })();
+
     setShowUndoBanner(true);
-    setUndoCountdown(10);
+    setUndoCountdown(5);
   };
 
   const addBall = async (
@@ -1871,9 +2094,6 @@ function LiveScoring() {
       handleWicketClick();
       return;
     }
-    setActionLock(true);
-    setTimeout(() => setActionLock(false), 350);
-    setCooldownRemaining(3);
 
     if (!currentInn) return toast.error("Start an innings first");
 
@@ -1904,44 +2124,66 @@ function LiveScoring() {
       extraRuns = runs;
     }
 
+    // Critical Event Confirmation
+    const totalRunsScored = batterRuns + extraRuns;
+    if (!checkCriticalConfirmation(isLegal, totalRunsScored, false)) {
+      return;
+    }
+
+    setActionLock(true);
+    setTimeout(() => setActionLock(false), 350);
+    setCooldownRemaining(3);
+
     const ballIndex = innBalls.length;
     const legalCount = currentInn.legal_balls;
     const overNo = Math.floor(legalCount / 6);
     const ballInOver = (legalCount % 6) + (isLegal ? 1 : 0);
 
-    const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    // Capture state snapshot before modifying state
-    const stateSnapshot: UndoState = {
-      inningsId: currentInn.id,
-      ballIndex,
-      striker,
-      nonStriker,
-      bowler,
-      isSoloPlay,
-    };
-    setUndoStates((prev) => [...prev, stateSnapshot]);
-
-    const newEvent: BallEvent = {
-      id: localId,
-      matchId: id,
-      inningsId: currentInn.id,
+    // Accidental duplicate tap protection
+    const now = Date.now();
+    const actionKey = `${kind}_${runs}`;
+    if (lastTapRef.current &&
+        lastTapRef.current.inningsNo === currentInn.innings_no &&
+        lastTapRef.current.ballIndex === ballIndex &&
+        lastTapRef.current.action === actionKey &&
+        (now - lastTapRef.current.timestamp) < 300) {
+      console.warn("Accidental duplicate tap rejected.");
+      return;
+    }
+    lastTapRef.current = {
       inningsNo: currentInn.innings_no,
       ballIndex,
-      overNumber: overNo,
-      ballInOver: isLegal ? ballInOver : (legalCount % 6) + 1,
-      batterId: striker,
-      nonStrikerId: isSoloPlay || isLastManActive ? null : nonStriker,
-      bowlerId: bowler,
-      runs: batterRuns,
-      extraRuns,
-      extraType: extraType as any,
-      isWicket,
-      wicketType: null,
-      isLegal,
-      caughtById: null,
-      timestamp: Date.now(),
-      synced: false,
+      action: actionKey,
+      timestamp: now
+    };
+
+    const eventUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
+    const newEvent: BallEventData = {
+      event_uuid: eventUuid,
+      event_type: 'BALL_EVENT',
+      sequence_number: nextSeq,
+      match_id: id,
+      innings_no: currentInn.innings_no,
+      over_no: overNo,
+      ball_no: isLegal ? ballInOver : (legalCount % 6) + 1,
+      striker_id: striker,
+      non_striker_id: isSoloPlay || isLastManActive ? null : nonStriker,
+      bowler_id: bowler,
+      batting_team_id: currentInn.batting_team_id,
+      bowling_team_id: currentInn.bowling_team_id,
+      runs_off_bat: batterRuns,
+      extras: extraRuns,
+      extra_type: extraType as any,
+      wicket: isWicket,
+      wicket_type: null,
+      dismissed_player_id: null,
+      legal_delivery: isLegal,
+      scorer_id: user?.id || null,
+      device_timestamp: now,
+      metadata: {
+        caught_by_id: null
+      }
     };
 
     const strikerBallsBefore = innBalls.filter((b) => b.batter_id === striker);
@@ -2059,79 +2301,139 @@ function LiveScoring() {
 
     // Save event locally
     (async () => {
-      await indexedDbService.saveDelivery({
-        ...newEvent,
-        inningsNo: currentInn.innings_no
+      await indexedDbService.saveBallEvent(newEvent);
+      await indexedDbService.addToSyncQueue({
+        id: eventUuid,
+        event_uuid: eventUuid,
+        match_id: id,
+        status: 'pending',
+        attempts: 0,
+        payload: newEvent
       });
-      if (isLegal && newLegal % 6 === 0) {
-        await indexedDbService.saveOverStatus(id, currentInn.innings_no, newEvent.overNumber, 'PENDING');
-        syncPendingData();
-      }
+      const strikerName = playerName(striker) || 'Unknown';
+      const bowlerName = playerName(bowler) || 'Unknown';
+      await logAudit(
+        'score',
+        `Scored ball: ${kind.toUpperCase()} (${runs} run(s)) by ${strikerName} off ${bowlerName}`,
+        eventUuid,
+        null,
+        newEvent
+      );
       loadLocalData();
+      syncPendingEvents();
     })();
     setUnlocked(false);
     setShowUndoBanner(true);
-    setUndoCountdown(10);
+    setUndoCountdown(5);
   };
 
   const undo = async () => {
-    if (!currentInn || innBalls.length === 0) return;
+    if (!currentInn) return;
     if (actionLock) return;
+
+    // Cooldown check
+    const now = Date.now();
+    if (now - lastUndoTime < 500) {
+      console.warn("Undo on cooldown.");
+      return;
+    }
+
+    // Replay event list: Find the target event uuid from the last effective ball event in the log
+    const undoneUuids = localEvents
+      .filter((e) => e.event_type === 'UNDO_EVENT')
+      .map((e) => e.metadata?.target_event_uuid)
+      .filter(Boolean) as string[];
+
+    const lastEffectiveBallEvent = localEvents
+      .filter(e => e.event_type === 'BALL_EVENT' && !undoneUuids.includes(e.event_uuid))
+      .pop();
+
+    if (!lastEffectiveBallEvent) {
+      toast.error("No effective ball event to undo.");
+      return;
+    }
+
+    // 5-second Quick Undo availability check
+    const ageInSeconds = (now - lastEffectiveBallEvent.device_timestamp) / 1000;
+    if (ageInSeconds > 5) {
+      toast.error("Quick Undo window (5s) has expired. Use Ball History to delete/edit older balls.");
+      return;
+    }
+
     setActionLock(true);
     setTimeout(() => setActionLock(false), 400);
 
-    const last = innBalls[innBalls.length - 1];
-
-    // Check if the last ball was recorded more than 120 seconds ago and ask for confirmation
-    const ballTime = last.created_at ? new Date(last.created_at).getTime() : Date.now();
-    const ageInSeconds = (Date.now() - ballTime) / 1000;
-    if (ageInSeconds > 120) {
-      const minutes = Math.round(ageInSeconds / 60);
-      const confirmMsg = `The last ball was recorded ${minutes} minute${minutes !== 1 ? "s" : ""} ago. Are you sure you want to undo it?`;
+    // Critical Undo protection
+    const isMatchFinished = derivedState?.status === 'past';
+    const isLastBallOfInnings = derivedState && (
+      derivedState.innings[derivedState.current_innings]?.legal_balls % 6 === 0 &&
+      derivedState.innings[derivedState.current_innings]?.legal_balls > 0
+    );
+    if (isMatchFinished || isLastBallOfInnings) {
+      const confirmMsg = isMatchFinished
+        ? "Match is finished. Undo this ball and reopen the match?"
+        : "This was the last ball of the innings. Undo it and reopen the innings?";
       if (!window.confirm(confirmMsg)) {
         return;
       }
     }
 
-    // Find the state snapshot for the ball we are undoing
-    const lastStateSnapshot = undoStates.find(
-      (us) => us.inningsId === (last.innings_id || last.inningsId) && us.ballIndex === (last.ball_index || last.ballIndex)
-    );
-
-    // Optimistic undo update
-    setUndoneBallIds((prev) => [...prev, last.id]);
-    setUndoStates((prev) =>
-      prev.filter(
-        (us) => !(us.inningsId === (last.innings_id || last.inningsId) && us.ballIndex === (last.ball_index || last.ballIndex))
-      )
-    );
-    triggerHaptic();
-
-    // Revert to snapshot state
-    if (lastStateSnapshot) {
-      setStriker(lastStateSnapshot.striker);
-      setNonStriker(lastStateSnapshot.nonStriker);
-      setBowler(lastStateSnapshot.bowler);
-      setIsSoloPlay(lastStateSnapshot.isSoloPlay);
-    } else {
-      setStriker("");
-      setNonStriker("");
-      setBowler("");
+    // Human panic detection
+    correctionHistoryRef.current = correctionHistoryRef.current.filter(t => (now - t) < 20000);
+    correctionHistoryRef.current.push(now);
+    if (correctionHistoryRef.current.length >= 3) {
+      toast.warning("Multiple corrections/undos detected. Please verify the scoreboard.", {
+        action: {
+          label: "Review History",
+          onClick: () => {
+            const el = document.getElementById("ball-history-section");
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
+          }
+        }
+      });
     }
 
-    try {
-      await indexedDbService.deleteDelivery(last.id);
-
-      const lastBallOverNo = last.over_number !== undefined ? last.over_number : last.overNumber;
-      await indexedDbService.deleteOverStatus(id, currentInn.innings_no, lastBallOverNo);
-
-      if (!last.id.startsWith('local_')) {
-        await indexedDbService.addPendingDeletion(last.id, id);
+    const undoUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
+    const undoEvent: BallEventData = {
+      event_uuid: undoUuid,
+      event_type: 'UNDO_EVENT',
+      sequence_number: nextSeq,
+      match_id: id,
+      innings_no: currentInn.innings_no,
+      runs_off_bat: 0,
+      extras: 0,
+      wicket: false,
+      legal_delivery: true,
+      scorer_id: user?.id || null,
+      device_timestamp: now,
+      metadata: {
+        target_event_uuid: lastEffectiveBallEvent.event_uuid
       }
+    };
 
+    try {
+      await indexedDbService.saveBallEvent(undoEvent);
+      await indexedDbService.addToSyncQueue({
+        id: undoUuid,
+        event_uuid: undoUuid,
+        match_id: id,
+        status: 'pending',
+        attempts: 0,
+        payload: undoEvent
+      });
+      await logAudit(
+        'undo',
+        `Undid ball event: ${lastEffectiveBallEvent.event_uuid}`,
+        undoUuid,
+        lastEffectiveBallEvent,
+        undoEvent
+      );
+      setLastUndoTime(now);
+      const updated = await indexedDbService.getBallEvents(id);
+      setLocalEvents(updated);
+      syncPendingEvents();
       toast.success("Last ball undone");
-      syncPendingData();
-      await loadLocalData();
     } catch (err: any) {
       console.error("Failed to undo ball locally", err);
       toast.error("Failed to undo ball: " + err.message);
@@ -2377,7 +2679,7 @@ function LiveScoring() {
           CricketHub Scoring
         </span>
         {/* Sync Status Badge */}
-        {localEvents.some((e) => !e.synced) ? (
+        {hasUnsyncedEvents ? (
           syncError ? (
             <div className="flex items-center gap-1 bg-red-950/40 border border-red-500/30 px-2 py-0.5 rounded-full" title={syncError}>
               <CloudOff className="h-3 w-3 text-red-400 animate-pulse" />
@@ -2709,6 +3011,63 @@ function LiveScoring() {
             </h3>
             
             <div className="space-y-3.5 text-xs">
+              {/* Active Batter & Bowler Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-3 border-b border-border/20">
+                {/* Batters */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+                    <span>Batsman</span>
+                    <div className="flex gap-4 font-mono">
+                      <span className="w-10 text-right">R(B)</span>
+                      <span className="w-8 text-right">4s/6s</span>
+                      <span className="w-12 text-right">SR</span>
+                    </div>
+                  </div>
+                  {activeBattersStats.length === 0 ? (
+                    <div className="text-muted-foreground italic text-xs py-1">No active batsmen</div>
+                  ) : (
+                    activeBattersStats.map((stat, idx) => (
+                      <div key={idx} className="flex justify-between items-center py-0.5">
+                        <div className="font-bold text-foreground truncate max-w-[130px] flex items-center gap-1">
+                          <span className={stat.isStriker ? "text-orange-500 font-extrabold" : "text-muted-foreground"}>
+                            {stat.name}{stat.isStriker && "*"}
+                          </span>
+                        </div>
+                        <div className="flex gap-4 font-mono font-bold text-xs text-right">
+                          <span className="w-10 text-foreground">{stat.runs}({stat.balls})</span>
+                          <span className="w-8 text-muted-foreground font-medium text-[11px]">{stat.fours}/{stat.sixes}</span>
+                          <span className="w-12 text-primary">{stat.sr}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Bowler */}
+                <div className="space-y-2 border-t md:border-t-0 md:border-l border-border/20 pt-2 md:pt-0 md:pl-4">
+                  <div className="flex justify-between items-center text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+                    <span>Bowler</span>
+                    <div className="flex gap-4 font-mono">
+                      <span className="w-10 text-right">O-R-W</span>
+                      <span className="w-12 text-right">Econ</span>
+                    </div>
+                  </div>
+                  {currentBowlerStat ? (
+                    <div className="flex justify-between items-center py-0.5">
+                      <span className="font-bold text-emerald-500 truncate max-w-[130px]">
+                        {currentBowlerStat.name}
+                      </span>
+                      <div className="flex gap-4 font-mono font-bold text-xs text-right">
+                        <span className="w-10 text-foreground">{currentBowlerStat.overs}-{currentBowlerStat.runs}-{currentBowlerStat.wickets}</span>
+                        <span className="w-12 text-primary">{currentBowlerStat.econ}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-muted-foreground italic text-xs py-1">No active bowler</div>
+                  )}
+                </div>
+              </div>
+
               {/* Partnership & Last 6 Balls */}
               <div className="grid grid-cols-2 gap-3 pb-3 border-b border-border/20">
                 <div>
@@ -2747,7 +3106,7 @@ function LiveScoring() {
               </div>
 
               {/* CRR, RRR & Projected Score */}
-              <div className="grid grid-cols-3 gap-2 pb-3 border-b border-border/20">
+              <div className="grid grid-cols-3 gap-2">
                 <div>
                   <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Run Rate</span>
                   <span className="font-extrabold text-foreground text-sm mt-0.5 block">
@@ -2770,37 +3129,6 @@ function LiveScoring() {
                   <span className="font-extrabold text-foreground text-sm mt-0.5 block">
                     {secondInningsInfo ? `RRR: ${secondInningsInfo.reqRR}` : "N/A"}
                   </span>
-                </div>
-              </div>
-
-              {/* Batting Stats & Bowler Economy */}
-              <div className="flex flex-wrap justify-between gap-4 mt-3 border-t border-border/40 pt-3 text-left">
-                <div className="flex-1 min-w-[130px]">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Batting Strike Rates</span>
-                  {activeBattersStats.length === 0 ? (
-                    <span className="text-[11px] text-muted-foreground">—</span>
-                  ) : (
-                    activeBattersStats.map((stat, idx) => (
-                      <div key={idx} className="flex justify-between items-center mt-1 gap-2">
-                        <span className="font-bold text-foreground truncate max-w-[100px]">{stat.name}</span>
-                        <span className="text-muted-foreground font-mono text-[11px] shrink-0">SR: {stat.sr}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div className="flex-1 min-w-[130px]">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider block">Current Bowler</span>
-                  {currentBowlerStat ? (
-                    <div className="mt-1">
-                      <div className="font-bold text-foreground truncate max-w-[130px]">{currentBowlerStat.name}</div>
-                      <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                        Econ: {currentBowlerStat.econ} | Wkts: {currentBowlerStat.wickets}
-                      </div>
-                    </div>
-                  ) : (
-                    <span className="text-[11px] text-muted-foreground">—</span>
-                  )}
                 </div>
               </div>
             </div>
@@ -3197,7 +3525,7 @@ function LiveScoring() {
               </div>
             )}
 
-            {!canScore && (
+            {!canScore && !isMatchCompleted && (
               <div className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 text-center py-2.5 px-4 rounded-xl text-xs font-medium space-y-1 mt-1">
                 <div className="font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 text-[9px]">
                   <span className="flex h-1.5 w-1.5 relative">
@@ -3209,6 +3537,25 @@ function LiveScoring() {
                 <div className="text-[10px] text-emerald-400/80">
                   Only the match creator or administrators can modify.
                 </div>
+              </div>
+            )}
+
+            {isMatchCompleted && (
+              <div className="p-5 rounded-2xl border border-rose-500/20 bg-gradient-to-r from-rose-500/15 via-red-500/10 to-amber-500/15 text-center shadow-lg relative overflow-hidden flex flex-col items-center justify-center gap-2 mt-4">
+                <div className="absolute top-0 right-0 p-1 pointer-events-none">
+                  <Trophy className="h-24 w-24 text-rose-500/5 absolute -top-6 -right-6" />
+                </div>
+                <div className="flex items-center gap-2 text-rose-500 font-extrabold text-sm uppercase tracking-wider">
+                  <Trophy className="h-5 w-5 animate-bounce" />
+                  Match Completed
+                </div>
+                <h2 className="text-xl font-black text-foreground drop-shadow-sm mt-1">
+                  {match?.result || "Match Finished"}
+                </h2>
+                <p className="text-xs text-muted-foreground font-semibold flex items-center gap-1.5 mt-0.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
+                  Scoring is locked. Review final stats below.
+                </p>
               </div>
             )}
           </Card>
@@ -4106,7 +4453,7 @@ function LiveScoring() {
           <div className="w-full h-1 bg-border/20 rounded-full overflow-hidden">
             <div
               className="bg-primary h-full transition-all duration-1000 ease-linear"
-              style={{ width: `${(undoCountdown / 10) * 100}%` }}
+              style={{ width: `${(undoCountdown / 5) * 100}%` }}
             />
           </div>
         </div>
@@ -4334,6 +4681,130 @@ function LiveScoring() {
           })()}
         </DialogContent>
       </Dialog>
+
+      {/* ── Audit Trail Card ─────────────────────────────── */}
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50, padding: '0 0 0 0' }}>
+        <div
+          id="audit-trail-section"
+          style={{
+            maxWidth: 640,
+            margin: '0 auto',
+            background: 'var(--card)',
+            border: '1px solid var(--border)',
+            borderRadius: showAuditTrail ? '16px 16px 0 0' : '16px 16px 0 0',
+            boxShadow: '0 -4px 24px rgba(0,0,0,0.18)',
+            overflow: 'hidden',
+          }}
+        >
+          {/* Header toggle */}
+          <button
+            onClick={() => setShowAuditTrail(v => !v)}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 16px',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--foreground)',
+            }}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 13 }}>
+              <History size={15} style={{ color: 'var(--primary)' }} />
+              Match Audit Trail
+              {auditLogs.length > 0 && (
+                <span style={{
+                  background: 'var(--primary)',
+                  color: 'var(--primary-foreground)',
+                  borderRadius: 999,
+                  padding: '1px 7px',
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}>
+                  {auditLogs.length}
+                </span>
+              )}
+            </span>
+            {showAuditTrail ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+          </button>
+
+          {/* Expandable log list */}
+          {showAuditTrail && (
+            <div style={{ maxHeight: 320, overflowY: 'auto', padding: '0 12px 12px' }}>
+              {auditLogs.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--muted-foreground)', fontSize: 12 }}>
+                  No audit events recorded yet. Start scoring to see the trail.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {auditLogs.slice(0, 50).map((log) => {
+                    const badgeConfig: Record<string, { bg: string; label: string }> = {
+                      score:         { bg: '#16a34a', label: 'SCORE' },
+                      correct:       { bg: '#d97706', label: 'CORRECT' },
+                      undo:          { bg: '#7c3aed', label: 'UNDO' },
+                      sync_attempt:  { bg: '#0284c7', label: 'SYNC' },
+                      sync_failure:  { bg: '#dc2626', label: 'FAIL' },
+                    };
+                    const cfg = badgeConfig[log.action_type] || { bg: '#6b7280', label: (log.action_type || 'LOG').toUpperCase() };
+                    const ts = new Date(log.device_timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    return (
+                      <div
+                        key={log.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 8,
+                          padding: '7px 10px',
+                          background: 'var(--muted)',
+                          borderRadius: 10,
+                          fontSize: 11,
+                        }}
+                      >
+                        {/* Action badge */}
+                        <span style={{
+                          background: cfg.bg,
+                          color: '#fff',
+                          borderRadius: 5,
+                          padding: '2px 7px',
+                          fontWeight: 800,
+                          fontSize: 9,
+                          letterSpacing: 0.5,
+                          flexShrink: 0,
+                          marginTop: 1,
+                        }}>
+                          {cfg.label}
+                        </span>
+
+                        {/* Description */}
+                        <span style={{ flex: 1, color: 'var(--foreground)', lineHeight: '1.4' }}>
+                          {log.description}
+                        </span>
+
+                        {/* Right-side meta */}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+                          <span style={{ color: 'var(--muted-foreground)', fontSize: 9 }}>{ts}</span>
+                          <span style={{
+                            background: log.synced ? '#bbf7d0' : '#fde68a',
+                            color: log.synced ? '#15803d' : '#92400e',
+                            borderRadius: 4,
+                            padding: '1px 5px',
+                            fontSize: 8,
+                            fontWeight: 700,
+                          }}>
+                            {log.synced ? 'Synced' : 'Pending'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </AppShell>
   );
 }

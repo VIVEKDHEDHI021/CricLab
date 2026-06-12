@@ -9,6 +9,17 @@ export type MatchDetail = {
   balls: any[];
 };
 
+export type MatchSquadPlayer = {
+  player_id: string;
+  display_name: string;
+  role?: string | null;
+  jersey_number?: string | null;
+  captain?: boolean;
+  wicket_keeper?: boolean;
+  is_guest?: boolean;
+  nickname?: string | null;
+};
+
 export const matchService = {
   async getMatches(): Promise<MatchSummary[]> {
     const { data } = await api.get<MatchSummary[]>('/matches');
@@ -77,6 +88,27 @@ export const matchService = {
       old_player_id: oldPlayerId,
       new_player_id: newPlayerId,
     });
+    return data;
+  },
+
+  async updateSquad(
+    id: string,
+    squadA: MatchSquadPlayer[],
+    squadB: MatchSquadPlayer[]
+  ): Promise<{ message: string }> {
+    const { data } = await api.put<{ message: string }>(`/matches/${id}/squad`, {
+      squad_a: squadA,
+      squad_b: squadB,
+    });
+    return data;
+  },
+
+  async syncAuditLogs(matchId: string, logs: any[]): Promise<void> {
+    await api.post(`/matches/${matchId}/audit-logs/sync`, { logs });
+  },
+
+  async getAuditLogs(matchId: string): Promise<any[]> {
+    const { data } = await api.get<any[]>(`/matches/${matchId}/audit-logs`);
     return data;
   },
 };

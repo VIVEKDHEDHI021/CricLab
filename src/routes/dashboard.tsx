@@ -36,6 +36,41 @@ function Section({
   isAdmin: boolean; 
   onDelete: (id: string) => void 
 }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const touchStartX = useRef(0);
+  const touchEndX = useRef(0);
+
+  useEffect(() => {
+    if (activeIndex >= items.length) {
+      setActiveIndex(0);
+    }
+  }, [items.length, activeIndex]);
+
+  const next = () => {
+    setActiveIndex((prev) => (prev + 1) % items.length);
+  };
+
+  const prev = () => {
+    setActiveIndex((prev) => (prev - 1 + items.length) % items.length);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.targetTouches[0].clientX;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    touchEndX.current = e.targetTouches[0].clientX;
+  };
+
+  const handleTouchEnd = () => {
+    if (touchStartX.current - touchEndX.current > 50) {
+      next();
+    }
+    if (touchStartX.current - touchEndX.current < -50) {
+      prev();
+    }
+  };
+
   return (
     <section className="space-y-3">
       <h2 className="text-xs font-black uppercase tracking-wider text-muted-foreground px-1">{title} Matches</h2>
@@ -45,12 +80,53 @@ function Section({
           <p className="text-xs text-muted-foreground/60">Matches in this category will appear here.</p>
         </Card>
       ) : (
-        <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 snap-x">
-          {items.map((m) => (
-            <div key={m.id} className="min-w-[85%] snap-start">
-              <MatchCard m={m} isAdmin={isAdmin} onDelete={onDelete} />
-            </div>
-          ))}
+        <div 
+          className="relative overflow-hidden w-full touch-pan-y"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div 
+            className="flex transition-transform duration-300 ease-out"
+            style={{ transform: `translateX(-${activeIndex * 100}%)` }}
+          >
+            {items.map((m) => (
+              <div key={m.id} className="w-full shrink-0 px-0.5">
+                <MatchCard m={m} isAdmin={isAdmin} onDelete={onDelete} />
+              </div>
+            ))}
+          </div>
+
+          {items.length > 1 && (
+            <>
+              <button 
+                onClick={prev}
+                className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 border border-white/10 text-white/80 p-1.5 rounded-full backdrop-blur-sm shadow z-10 transition-all active:scale-95 cursor-pointer"
+                aria-label="Previous Match"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button 
+                onClick={next}
+                className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 border border-white/10 text-white/80 p-1.5 rounded-full backdrop-blur-sm shadow z-10 transition-all active:scale-95 cursor-pointer"
+                aria-label="Next Match"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+
+              <div className="flex justify-center gap-1.5 mt-3">
+                {items.map((_, idx) => (
+                  <span 
+                    key={idx}
+                    onClick={() => setActiveIndex(idx)}
+                    className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
+                      idx === activeIndex ? "w-4 bg-orange-500" : "w-1.5 bg-muted-foreground/30"
+                    }`}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </section>

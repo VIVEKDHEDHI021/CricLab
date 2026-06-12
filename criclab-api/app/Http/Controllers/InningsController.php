@@ -18,6 +18,10 @@ class InningsController extends Controller
 
         $match = CricketMatch::findOrFail($matchId);
 
+        if ($match->status === 'past') {
+            return response()->json(['message' => 'Scoring is locked for this match.'], 422);
+        }
+
         if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
             return response()->json(['message' => 'You are not authorized to score this match.'], 403);
         }
@@ -43,6 +47,10 @@ class InningsController extends Controller
     {
         $innings = Innings::findOrFail($id);
         $match = CricketMatch::findOrFail($innings->match_id);
+
+        if ($match->status === 'past') {
+            return response()->json(['message' => 'Scoring is locked for this match.'], 422);
+        }
 
         if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
             return response()->json(['message' => 'You are not authorized to score this match.'], 403);

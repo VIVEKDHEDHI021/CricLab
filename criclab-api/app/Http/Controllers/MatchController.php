@@ -5,7 +5,12 @@ namespace App\Http\Controllers;
 use App\Models\CricketMatch;
 use App\Models\Team;
 use App\Models\Player;
+use App\Models\MatchSquad;
+use App\Models\BallEvent;
+use App\Models\AuditLog;
+use Illuminate\Support\Str;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class MatchController extends Controller
 {
@@ -42,6 +47,59 @@ class MatchController extends Controller
         return response()->json($result);
     }
 
+    private function initializeMatchSquads(CricketMatch $match, array $squadAIds = [], array $squadBIds = [])
+    {
+        if ($match->squads()->exists()) {
+            return;
+        }
+
+        if (empty($squadAIds)) {
+            $squadAIds = Player::where('team_id', $match->team_a_id)->pluck('id')->toArray();
+        }
+        if (empty($squadBIds)) {
+            $squadBIds = Player::where('team_id', $match->team_b_id)->pluck('id')->toArray();
+        }
+
+        $squadAIds = array_values(array_unique(array_filter($squadAIds)));
+        $squadBIds = array_values(array_unique(array_filter($squadBIds)));
+
+        foreach ($squadAIds as $pId) {
+            $p = Player::withTrashed()->find($pId);
+            if ($p) {
+                MatchSquad::create([
+                    'match_id' => $match->id,
+                    'team_id' => $match->team_a_id,
+                    'player_id' => $p->id,
+                    'display_name' => $p->name,
+                    'nickname' => null,
+                    'jersey_number' => $p->jersey_number ?? null,
+                    'role' => $p->role ?? null,
+                    'captain' => false,
+                    'wicket_keeper' => false,
+                    'is_guest' => false,
+                ]);
+            }
+        }
+
+        foreach ($squadBIds as $pId) {
+            $p = Player::withTrashed()->find($pId);
+            if ($p) {
+                MatchSquad::create([
+                    'match_id' => $match->id,
+                    'team_id' => $match->team_b_id,
+                    'player_id' => $p->id,
+                    'display_name' => $p->name,
+                    'nickname' => null,
+                    'jersey_number' => $p->jersey_number ?? null,
+                    'role' => $p->role ?? null,
+                    'captain' => false,
+                    'wicket_keeper' => false,
+                    'is_guest' => false,
+                ]);
+            }
+        }
+    }
+
     public function show($id)
     {
         $match = CricketMatch::findOrFail($id);
@@ -49,107 +107,35 @@ class MatchController extends Controller
         $innings = $match->innings()->orderBy('innings_no')->get();
         $balls = $match->balls()->orderBy('ball_index')->get();
 
-        $squadA = $match->squad_a_ids ?? [];
-        $squadB = $match->squad_b_ids ?? [];
-
-        $referencedPlayerIds = $balls->flatMap(function ($b) {
-            return [$b->batter_id, $b->non_striker_id, $b->bowler_id, $b->caught_by_id];
-        })->filter()->unique()->all();
-
-        if ($match->status === 'live' || $match->status === 'upcoming' || (empty($squadA) && empty($squadB))) {
-            $currentTeamAPlayerIds = Player::where('team_id', $match->team_a_id)->pluck('id')->toArray();
-            $currentTeamBPlayerIds = Player::where('team_id', $match->team_b_id)->pluck('id')->toArray();
-
-            $squadA = array_values(array_unique(array_merge($squadA, $currentTeamAPlayerIds)));
-            $squadB = array_values(array_unique(array_merge($squadB, $currentTeamBPlayerIds)));
-
-            if ($match->status === 'live' || $match->status === 'upcoming') {
-                $squadA = array_filter($squadA, function ($playerId) use ($currentTeamAPlayerIds, $referencedPlayerIds, $balls, $innings, $match) {
-                    if (in_array($playerId, $currentTeamAPlayerIds)) return true;
-                    if (!in_array($playerId, $referencedPlayerIds)) return false;
-                    foreach ($balls as $b) {
-                        if ($b->batter_id === $playerId || $b->non_striker_id === $playerId) {
-                            $inn = $innings->firstWhere('id', $b->innings_id);
-                            if ($inn && $inn->batting_team_id === $match->team_a_id) return true;
-                        }
-                        if ($b->bowler_id === $playerId || $b->caught_by_id === $playerId) {
-                            $inn = $innings->firstWhere('id', $b->innings_id);
-                            if ($inn && $inn->bowling_team_id === $match->team_a_id) return true;
-                        }
-                    }
-                    return false;
-                });
-
-                $squadB = array_filter($squadB, function ($playerId) use ($currentTeamBPlayerIds, $referencedPlayerIds, $balls, $innings, $match) {
-                    if (in_array($playerId, $currentTeamBPlayerIds)) return true;
-                    if (!in_array($playerId, $referencedPlayerIds)) return false;
-                    foreach ($balls as $b) {
-                        if ($b->batter_id === $playerId || $b->non_striker_id === $playerId) {
-                            $inn = $innings->firstWhere('id', $b->innings_id);
-                            if ($inn && $inn->batting_team_id === $match->team_b_id) return true;
-                        }
-                        if ($b->bowler_id === $playerId || $b->caught_by_id === $playerId) {
-                            $inn = $innings->firstWhere('id', $b->innings_id);
-                            if ($inn && $inn->bowling_team_id === $match->team_b_id) return true;
-                        }
-                    }
-                    return false;
-                });
-            }
+        if (!$match->squads()->exists()) {
+            $this->initializeMatchSquads($match, $match->squad_a_ids ?? [], $match->squad_b_ids ?? []);
         }
 
-        // Add any player referenced in balls who isn't already in squads
-        foreach ($referencedPlayerIds as $playerId) {
-            if (in_array($playerId, $squadA) || in_array($playerId, $squadB)) {
-                continue;
-            }
-            $teamId = null;
-            foreach ($balls as $b) {
-                if ($b->batter_id === $playerId || $b->non_striker_id === $playerId) {
-                    $inn = $innings->firstWhere('id', $b->innings_id);
-                    if ($inn) {
-                        $teamId = $inn->batting_team_id;
-                        break;
-                    }
-                }
-                if ($b->bowler_id === $playerId || $b->caught_by_id === $playerId) {
-                    $inn = $innings->firstWhere('id', $b->innings_id);
-                    if ($inn) {
-                        $teamId = $inn->bowling_team_id;
-                        break;
-                    }
-                }
-            }
-            if ($teamId === $match->team_a_id) {
-                $squadA[] = $playerId;
-            } elseif ($teamId === $match->team_b_id) {
-                $squadB[] = $playerId;
-            }
-        }
-
-        $squadA = array_values(array_unique($squadA));
-        $squadB = array_values(array_unique($squadB));
-
-        if ($match->squad_a_ids !== $squadA || $match->squad_b_ids !== $squadB) {
-            $match->squad_a_ids = $squadA;
-            $match->squad_b_ids = $squadB;
-            // Note: We do not call $match->save() here to avoid database locks or 
-            // read-only database errors during GET requests (e.g. on serverless environments).
-        }
-
-        $allSquadIds = array_unique(array_merge($squadA, $squadB));
-        $players = Player::withTrashed()
-            ->whereIn('id', $allSquadIds)
-            ->get();
-
-        $players = $players->map(function ($player) use ($squadA, $squadB, $match) {
-            if (in_array($player->id, $squadA)) {
-                $player->team_id = $match->team_a_id;
-            } elseif (in_array($player->id, $squadB)) {
-                $player->team_id = $match->team_b_id;
-            }
-            return $player;
+        $players = $match->squads()->get()->map(function ($sq) {
+            return [
+                'id' => $sq->player_id,
+                'name' => $sq->display_name,
+                'team_id' => $sq->team_id,
+                'role' => $sq->role,
+                'jersey_number' => $sq->jersey_number,
+                'captain' => $sq->captain,
+                'wicket_keeper' => $sq->wicket_keeper,
+                'is_guest' => $sq->is_guest,
+                'nickname' => $sq->nickname,
+                'mobile' => null,
+                'avatar' => null,
+                'batting_style' => null,
+                'bowling_style' => null,
+                'age' => null,
+                'city' => null,
+            ];
         });
+
+        $squadA = $match->squads()->where('team_id', $match->team_a_id)->pluck('player_id')->toArray();
+        $squadB = $match->squads()->where('team_id', $match->team_b_id)->pluck('player_id')->toArray();
+
+        $match->squad_a_ids = $squadA;
+        $match->squad_b_ids = $squadB;
 
         return response()->json([
             'm' => $match,
@@ -195,6 +181,8 @@ class MatchController extends Controller
             'squad_b_ids' => $request->squad_b_ids ?? [],
         ]);
 
+        $this->initializeMatchSquads($match, $request->squad_a_ids ?? [], $request->squad_b_ids ?? []);
+
         return response()->json($match, 201);
     }
 
@@ -235,7 +223,7 @@ class MatchController extends Controller
         $inn1 = $innings->where('innings_no', 1)->first();
         $inn2 = $innings->where('innings_no', 2)->first();
 
-        $result = "Match ended";
+        $result = "No result";
         if ($inn1 && $inn2) {
             $team1 = Team::find($inn1->batting_team_id);
             $team2 = Team::find($inn2->batting_team_id);
@@ -267,15 +255,23 @@ class MatchController extends Controller
             }
         }
 
-        $match->update([
-            'status' => 'past',
-            'result' => $result,
+        // Create MATCH_ENDED event to preserve in the timeline
+        $nextSeq = BallEvent::where('match_id', $id)->max('sequence_number') + 1;
+        BallEvent::create([
+            'event_uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'event_type' => 'MATCH_ENDED',
+            'sequence_number' => $nextSeq,
+            'match_id' => $id,
+            'innings_no' => $inn2 ? 2 : 1,
+            'scorer_id' => $request->user()->id,
+            'device_timestamp' => round(microtime(true) * 1000),
+            'metadata' => [
+                'result' => $result
+            ]
         ]);
 
-        // Close all innings for the match
-        $match->innings()->update(['is_closed' => true]);
-
-        \App\Events\MatchUpdated::dispatchSafe($match);
+        // Run replay to project state
+        \App\Services\MatchEngine::replay($id);
 
         return response()->json(['result' => $result]);
     }
@@ -310,6 +306,10 @@ class MatchController extends Controller
     {
         $match = CricketMatch::findOrFail($id);
 
+        if ($match->isFrozen()) {
+            return response()->json(['message' => 'Cannot replace player. Scoring has already started.'], 422);
+        }
+
         if (!in_array($request->user()->role, ['admin', 'scorer']) && $match->created_by !== $request->user()->id) {
             return response()->json(['message' => 'You are not authorized to score this match.'], 403);
         }
@@ -330,6 +330,17 @@ class MatchController extends Controller
         $newPlayer = Player::find($newPlayerId);
 
         \Illuminate\Support\Facades\DB::transaction(function () use ($match, $oldPlayerId, $newPlayerId, $oldPlayer, $newPlayer) {
+            // Update MatchSquad record
+            $squadRecord = $match->squads()->where('player_id', $oldPlayerId)->first();
+            if ($squadRecord && $newPlayer) {
+                $squadRecord->update([
+                    'player_id' => $newPlayerId,
+                    'display_name' => $newPlayer->name,
+                    'jersey_number' => $newPlayer->jersey_number ?? null,
+                    'role' => $newPlayer->role ?? null,
+                ]);
+            }
+
             // Update balls
             \Illuminate\Support\Facades\DB::table('balls')
                 ->where('match_id', $match->id)
@@ -438,5 +449,128 @@ class MatchController extends Controller
             'current_innings' => $innings->where('is_closed', false)->first()?->innings_no ?? ($innings->last()?->innings_no ?? 1),
             'synced_overs' => $syncedOvers,
         ]);
+    }
+
+    public function updateSquad(Request $request, $id)
+    {
+        $match = CricketMatch::findOrFail($id);
+
+        if ($match->isFrozen()) {
+            return response()->json(['message' => 'Cannot update squad. Scoring has already started.'], 422);
+        }
+
+        $request->validate([
+            'squad_a' => 'present|array',
+            'squad_a.*.player_id' => 'required|uuid',
+            'squad_a.*.display_name' => 'required|string|max:255',
+            'squad_a.*.role' => 'nullable|string|max:100',
+            'squad_a.*.jersey_number' => 'nullable|string|max:20',
+            'squad_a.*.captain' => 'nullable|boolean',
+            'squad_a.*.wicket_keeper' => 'nullable|boolean',
+            'squad_a.*.is_guest' => 'nullable|boolean',
+
+            'squad_b' => 'present|array',
+            'squad_b.*.player_id' => 'required|uuid',
+            'squad_b.*.display_name' => 'required|string|max:255',
+            'squad_b.*.role' => 'nullable|string|max:100',
+            'squad_b.*.jersey_number' => 'nullable|string|max:20',
+            'squad_b.*.captain' => 'nullable|boolean',
+            'squad_b.*.wicket_keeper' => 'nullable|boolean',
+            'squad_b.*.is_guest' => 'nullable|boolean',
+        ]);
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($match, $request) {
+            // Delete existing squads
+            $match->squads()->delete();
+
+            // Insert Squad A
+            foreach ($request->squad_a as $p) {
+                MatchSquad::create([
+                    'match_id' => $match->id,
+                    'team_id' => $match->team_a_id,
+                    'player_id' => $p['player_id'],
+                    'display_name' => $p['display_name'],
+                    'nickname' => $p['nickname'] ?? null,
+                    'jersey_number' => $p['jersey_number'] ?? null,
+                    'role' => $p['role'] ?? null,
+                    'captain' => !empty($p['captain']),
+                    'wicket_keeper' => !empty($p['wicket_keeper']),
+                    'is_guest' => !empty($p['is_guest']),
+                ]);
+            }
+
+            // Insert Squad B
+            foreach ($request->squad_b as $p) {
+                MatchSquad::create([
+                    'match_id' => $match->id,
+                    'team_id' => $match->team_b_id,
+                    'player_id' => $p['player_id'],
+                    'display_name' => $p['display_name'],
+                    'nickname' => $p['nickname'] ?? null,
+                    'jersey_number' => $p['jersey_number'] ?? null,
+                    'role' => $p['role'] ?? null,
+                    'captain' => !empty($p['captain']),
+                    'wicket_keeper' => !empty($p['wicket_keeper']),
+                    'is_guest' => !empty($p['is_guest']),
+                ]);
+            }
+
+            // Sync legacy columns
+            $squadA = array_column($request->squad_a, 'player_id');
+            $squadB = array_column($request->squad_b, 'player_id');
+            $match->update([
+                'squad_a_ids' => $squadA,
+                'squad_b_ids' => $squadB,
+            ]);
+        });
+
+        \App\Events\MatchUpdated::dispatchSafe($match);
+
+        return response()->json(['message' => 'Squad updated successfully.']);
+    }
+
+    public function syncAuditLogs(Request $request, $matchId)
+    {
+        $request->validate([
+            'logs' => 'required|array',
+            'logs.*.id' => 'required|uuid',
+            'logs.*.action_type' => 'required|string',
+            'logs.*.description' => 'required|string',
+            'logs.*.device_timestamp' => 'required|integer',
+        ]);
+
+        $match = CricketMatch::findOrFail($matchId);
+
+        DB::transaction(function () use ($matchId, $request) {
+            foreach ($request->logs as $log) {
+                if (AuditLog::where('id', $log['id'])->exists()) {
+                    continue;
+                }
+
+                AuditLog::create([
+                    'id' => $log['id'],
+                    'match_id' => $matchId,
+                    'event_uuid' => $log['event_uuid'] ?? null,
+                    'action_type' => $log['action_type'],
+                    'user_id' => $request->user()?->id,
+                    'description' => $log['description'],
+                    'old_state' => isset($log['old_state']) ? $log['old_state'] : null,
+                    'new_state' => isset($log['new_state']) ? $log['new_state'] : null,
+                    'device_timestamp' => $log['device_timestamp'],
+                ]);
+            }
+        });
+
+        return response()->json(['message' => 'Audit logs synced successfully.']);
+    }
+
+    public function getAuditLogs($matchId)
+    {
+        $match = CricketMatch::findOrFail($matchId);
+        $logs = AuditLog::where('match_id', $matchId)
+            ->orderBy('device_timestamp', 'asc')
+            ->get();
+
+        return response()->json($logs);
     }
 }

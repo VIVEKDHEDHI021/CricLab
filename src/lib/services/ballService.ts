@@ -103,4 +103,27 @@ export const ballService = {
     const { data } = await api.get<any>(`/matches/${matchId}/sync-status`);
     return data;
   },
+
+  async logEvent(
+    matchId: string,
+    eventData: any
+  ): Promise<any> {
+    const { data } = await api.post<any>(`/matches/${matchId}/events`, eventData);
+    return data;
+  },
+
+  async getEvents(
+    matchId: string
+  ): Promise<any[]> {
+    const { data } = await api.get<any[]>(`/matches/${matchId}/events`);
+    return data;
+  },
+
+  async syncEvents(
+    matchId: string,
+    events: any[]
+  ): Promise<{ message: string }> {
+    const { data } = await api.post<{ message: string }>(`/matches/${matchId}/events/sync`, { events });
+    return data;
+  },
 };

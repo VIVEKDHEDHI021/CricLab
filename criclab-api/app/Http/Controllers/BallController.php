@@ -2,212 +2,22 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Ball;
-use App\Models\Innings;
+use App\Models\BallEvent;
 use App\Models\CricketMatch;
+use App\Models\Innings;
+use App\Models\Ball;
 use App\Models\Player;
 use App\Models\Team;
+use App\Services\MatchEngine;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 
 class BallController extends Controller
 {
-    public static function recalculateInnings($inningsId)
-    {
-        $balls = Ball::where('innings_id', $inningsId)->orderBy('ball_index')->get();
-        $innings = Innings::findOrFail($inningsId);
-        $match = CricketMatch::findOrFail($innings->match_id);
-
-        if ($balls->isEmpty()) {
-            $innings->update([
-                'runs' => 0,
-                'wickets' => 0,
-                'legal_balls' => 0,
-                'is_closed' => false,
-            ]);
-            return;
-        }
-
-        // Initialize strikers from the first ball
-        $firstBall = $balls->first();
-        $striker = $firstBall->batter_id;
-        $non_striker = $firstBall->non_striker_id;
-
-        $legal_balls_count = 0;
-
-        foreach ($balls as $index => $ball) {
-            // Update ball index, over number, and ball in over
-            $over_number = floor($legal_balls_count / 6);
-            $ball_in_over = ($legal_balls_count % 6) + 1;
-
-            $ball->ball_index = $index;
-            $ball->over_number = $over_number;
-            $ball->ball_in_over = $ball_in_over;
-
-            // Recalculate striker/non-striker for this ball based on previous ball outcome
-            if ($index > 0) {
-                $prevBall = $balls[$index - 1];
-
-                if ($prevBall->is_wicket) {
-                    $dismissed_id = $prevBall->batter_id;
-                    $surviving_id = $prevBall->non_striker_id;
-
-                    $new_batter = null;
-                    if ($surviving_id === null) {
-                        $new_batter = $ball->batter_id;
-                    } else {
-                        if ($ball->batter_id !== $surviving_id) {
-                            $new_batter = $ball->batter_id;
-                        } elseif ($ball->non_striker_id !== $surviving_id) {
-                            $new_batter = $ball->non_striker_id;
-                        }
-                    }
-
-                    if ($dismissed_id === $striker) {
-                        $striker = $new_batter;
-                        $non_striker = $surviving_id;
-                    } elseif ($dismissed_id === $non_striker) {
-                        $non_striker = $new_batter;
-                        $striker = $surviving_id;
-                    } else {
-                        if ($striker === null || $striker === '') {
-                            $striker = $new_batter;
-                        } else {
-                            $non_striker = $new_batter;
-                        }
-                    }
-                } else {
-                    $runs_odd = ($prevBall->runs % 2 === 1);
-                    $extras_odd = in_array($prevBall->extra_type, ['bye', 'leg_bye']) && ($prevBall->extra_runs % 2 === 1);
-                    $should_swap_runs = $runs_odd || $extras_odd;
-
-                    $should_swap_over = $prevBall->is_legal && (($legal_balls_count) % 6 === 0);
-
-                    if ($should_swap_runs !== $should_swap_over) {
-                        if ($striker !== null && $non_striker !== null) {
-                            $temp = $striker;
-                            $striker = $non_striker;
-                            $non_striker = $temp;
-                        }
-                    }
-                }
-            }
-
-            // Assign recalculated roles to the current ball
-            if ($ball->is_wicket) {
-                if ($ball->wicket_type === 'run_out' && $ball->non_striker_id === $striker) {
-                    $ball->batter_id = $non_striker;
-                    $ball->non_striker_id = $striker;
-                } else {
-                    $ball->batter_id = $striker;
-                    $ball->non_striker_id = $non_striker;
-                }
-            } else {
-                $ball->batter_id = $striker;
-                $ball->non_striker_id = $non_striker;
-            }
-
-            $ball->save();
-
-            if ($ball->is_legal) {
-                $legal_balls_count++;
-            }
-        }
-
-        // Calculate Innings totals
-        $totalRuns = 0;
-        $totalWickets = 0;
-        $totalLegal = 0;
-
-        foreach ($balls as $b) {
-            $totalRuns += ($b->runs + $b->extra_runs);
-            if ($b->is_wicket) {
-                $totalWickets++;
-            }
-            if ($b->is_legal) {
-                $totalLegal++;
-            }
-        }
-
-        $currentBattingPlayerIds = Player::where('team_id', $innings->batting_team_id)->pluck('id')->all();
-        $actualBattingPlayerIds = Ball::where('innings_id', $innings->id)
-            ->get()
-            ->flatMap(function ($b) {
-                return [$b->batter_id, $b->non_striker_id];
-            })
-            ->filter()
-            ->unique()
-            ->all();
-        $battingPlayersCount = count(array_unique(array_merge($currentBattingPlayerIds, $actualBattingPlayerIds)));
-
-        $isLastMan = $match->last_man_batting;
-        $maxWickets = $battingPlayersCount > 0 
-            ? ($isLastMan ? $battingPlayersCount : $battingPlayersCount - 1) 
-            : 10;
-        if ($maxWickets <= 0) $maxWickets = 10;
-
-        $isClosed = false;
-        if ($totalLegal >= $match->overs * 6 || $totalWickets >= $maxWickets || $totalWickets >= 10) {
-            $isClosed = true;
-        }
-
-        if ($innings->innings_no === 2) {
-            $firstInnings = Innings::where('match_id', $match->id)
-                ->where('innings_no', 1)
-                ->first();
-
-            if ($firstInnings) {
-                if ($totalRuns > $firstInnings->runs) {
-                    $isClosed = true;
-
-                    $chasingTeam = Team::find($innings->batting_team_id);
-                    $wicketsRemaining = $isLastMan 
-                        ? ($battingPlayersCount - $totalWickets) 
-                        : (($battingPlayersCount > 0 ? $battingPlayersCount - 1 : 10) - $totalWickets);
-                    
-                    if ($wicketsRemaining < 0) $wicketsRemaining = 0;
-                    
-                    $result = ($chasingTeam->name ?? 'Second Team') . ' won by ' . $wicketsRemaining . ' ' . ($wicketsRemaining === 1 ? 'wicket' : 'wickets');
-                    
-                    $match->update([
-                        'status' => 'past',
-                        'result' => $result,
-                    ]);
-                    $match->innings()->update(['is_closed' => true]);
-                } elseif ($isClosed) {
-                    $defendingTeam = Team::find($firstInnings->batting_team_id);
-                    
-                    if ($totalRuns === $firstInnings->runs) {
-                        $result = 'Match tied';
-                    } else {
-                        $result = ($defendingTeam->name ?? 'First Team') . ' won by ' . ($firstInnings->runs - $totalRuns) . ' runs';
-                    }
-                    
-                    $match->update([
-                        'status' => 'past',
-                        'result' => $result,
-                    ]);
-                    $match->innings()->update(['is_closed' => true]);
-                }
-            }
-        }
-
-        if (!$isClosed && $innings->is_closed) {
-            if ($match->status === 'past') {
-                $match->update([
-                    'status' => 'live',
-                    'result' => null,
-                ]);
-            }
-        }
-
-        $innings->update([
-            'runs' => $totalRuns,
-            'wickets' => $totalWickets,
-            'legal_balls' => $totalLegal,
-            'is_closed' => $isClosed,
-        ]);
-    }
-
+    /**
+     * Store a new ball event.
+     */
     public function store(Request $request, $inningsId)
     {
         $request->validate([
@@ -227,52 +37,88 @@ class BallController extends Controller
             'caught_by_id' => 'nullable|uuid|exists:players,id',
         ]);
 
+        $matchId = $request->match_id;
         $innings = Innings::findOrFail($inningsId);
-        $match = CricketMatch::findOrFail($request->match_id);
+        $match = CricketMatch::findOrFail($matchId);
+
+        if ($match->status === 'past') {
+            return response()->json(['message' => 'Scoring is locked for this match.'], 422);
+        }
 
         if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
             return response()->json(['message' => 'You are not authorized to score this match.'], 403);
         }
 
-        $ball = Ball::create([
-            'innings_id' => $inningsId,
-            'match_id' => $request->match_id,
-            'ball_index' => $request->ball_index,
-            'over_number' => $request->over_number,
-            'ball_in_over' => $request->ball_in_over,
-            'batter_id' => $request->batter_id,
-            'non_striker_id' => $request->non_striker_id,
-            'bowler_id' => $request->bowler_id,
-            'runs' => $request->runs,
-            'extra_runs' => $request->extra_runs,
-            'extra_type' => $request->extra_type,
-            'is_wicket' => $request->is_wicket,
-            'wicket_type' => $request->wicket_type,
-            'is_legal' => $request->is_legal,
-            'caught_by_id' => $request->caught_by_id,
-        ]);
+        // Duplicate Tap Protection (Backend)
+        $exists = BallEvent::where('match_id', $matchId)
+            ->where('innings_no', $innings->innings_no)
+            ->where('over_no', $request->over_number)
+            ->where('ball_no', $request->ball_in_over)
+            ->where('striker_id', $request->batter_id)
+            ->where('runs_off_bat', $request->runs)
+            ->where('extras', $request->extra_runs)
+            ->where('created_at', '>=', now()->subSeconds(2))
+            ->exists();
 
-        if ($request->is_wicket && $request->wicket_type === 'caught' && $request->caught_by_id) {
-            $catcher = Player::find($request->caught_by_id);
-            if ($catcher) {
-                $catcher->increment('catches');
-            }
+        if ($exists) {
+            return response()->json(['message' => 'Duplicate tap rejected.'], 422);
         }
 
-        self::recalculateInnings($inningsId);
+        $eventUuid = (string) Str::uuid();
+        $nextSeq = BallEvent::where('match_id', $matchId)->max('sequence_number') + 1;
 
-        $ball->refresh();
+        $event = BallEvent::create([
+            'event_uuid' => $eventUuid,
+            'event_type' => 'BALL_EVENT',
+            'sequence_number' => $nextSeq,
+            'match_id' => $matchId,
+            'innings_no' => $innings->innings_no,
+            'over_no' => $request->over_number,
+            'ball_no' => $request->ball_in_over,
+            'striker_id' => $request->batter_id,
+            'non_striker_id' => $request->non_striker_id,
+            'bowler_id' => $request->bowler_id,
+            'batting_team_id' => $innings->batting_team_id,
+            'bowling_team_id' => $innings->bowling_team_id,
+            'runs_off_bat' => $request->runs,
+            'extras' => $request->extra_runs,
+            'extra_type' => $request->extra_type,
+            'wicket' => $request->is_wicket,
+            'wicket_type' => $request->wicket_type,
+            'dismissed_player_id' => $request->is_wicket ? ($request->wicket_type === 'run_out' ? $request->non_striker_id : $request->batter_id) : null,
+            'legal_delivery' => $request->is_legal,
+            'scorer_id' => $request->user()->id,
+            'device_timestamp' => round(microtime(true) * 1000),
+            'metadata' => [
+                'caught_by_id' => $request->caught_by_id
+            ]
+        ]);
 
+        // Replay and project
+        MatchEngine::replay($matchId);
+
+        // Fetch replayed ball projection to match original return structure
+        $projectedBall = Ball::find($eventUuid);
+
+        $match->refresh();
         \App\Events\MatchUpdated::dispatchSafe($match);
 
-        return response()->json($ball, 201);
+        return response()->json($projectedBall, 201);
     }
 
+    /**
+     * Correct a ball event (Correction).
+     */
     public function update(Request $request, $id)
     {
-        $ball = Ball::findOrFail($id);
-        $innings = Innings::findOrFail($ball->innings_id);
+        $oldBall = Ball::findOrFail($id);
+        $innings = Innings::findOrFail($oldBall->innings_id);
         $match = CricketMatch::findOrFail($innings->match_id);
+        $matchId = $match->id;
+
+        if ($match->status === 'past') {
+            return response()->json(['message' => 'Scoring is locked for this match.'], 422);
+        }
 
         if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
             return response()->json(['message' => 'You are not authorized to score this match.'], 403);
@@ -291,44 +137,89 @@ class BallController extends Controller
             'caught_by_id' => 'nullable|uuid|exists:players,id',
         ]);
 
-        $oldIsCaught = $ball->is_wicket && $ball->wicket_type === 'caught' && $ball->caught_by_id;
-        $newIsCaught = $request->is_wicket && $request->wicket_type === 'caught' && $request->caught_by_id;
+        $eventUuid = (string) Str::uuid();
+        $nextSeq = BallEvent::where('match_id', $matchId)->max('sequence_number') + 1;
 
-        if ($oldIsCaught && $newIsCaught && $ball->caught_by_id !== $request->caught_by_id) {
-            $oldCatcher = Player::find($ball->caught_by_id);
-            if ($oldCatcher) $oldCatcher->decrement('catches');
-            $newCatcher = Player::find($request->caught_by_id);
-            if ($newCatcher) $newCatcher->increment('catches');
-        } elseif ($oldIsCaught && !$newIsCaught) {
-            $oldCatcher = Player::find($ball->caught_by_id);
-            if ($oldCatcher) $oldCatcher->decrement('catches');
-        } elseif (!$oldIsCaught && $newIsCaught) {
-            $newCatcher = Player::find($request->caught_by_id);
-            if ($newCatcher) $newCatcher->increment('catches');
-        }
-
-        $ball->update([
-            'batter_id' => $request->batter_id,
-            'non_striker_id' => $request->non_striker_id,
-            'bowler_id' => $request->bowler_id,
-            'runs' => $request->runs,
-            'extra_runs' => $request->extra_runs,
-            'extra_type' => $request->extra_type,
-            'is_wicket' => $request->is_wicket,
-            'wicket_type' => $request->wicket_type,
-            'is_legal' => $request->is_legal,
-            'caught_by_id' => $request->caught_by_id,
+        BallEvent::create([
+            'event_uuid' => $eventUuid,
+            'event_type' => 'CORRECTION_EVENT',
+            'sequence_number' => $nextSeq,
+            'match_id' => $matchId,
+            'innings_no' => $innings->innings_no,
+            'over_no' => $oldBall->over_number,
+            'ball_no' => $oldBall->ball_in_over,
+            'scorer_id' => $request->user()->id,
+            'device_timestamp' => round(microtime(true) * 1000),
+            'metadata' => [
+                'target_event_uuid' => $id,
+                'striker_id' => $request->batter_id,
+                'non_striker_id' => $request->non_striker_id,
+                'bowler_id' => $request->bowler_id,
+                'runs_off_bat' => $request->runs,
+                'extras' => $request->extra_runs,
+                'extra_type' => $request->extra_type,
+                'wicket' => $request->is_wicket,
+                'wicket_type' => $request->wicket_type,
+                'dismissed_player_id' => $request->is_wicket ? ($request->wicket_type === 'run_out' ? $request->non_striker_id : $request->batter_id) : null,
+                'legal_delivery' => $request->is_legal,
+                'caught_by_id' => $request->caught_by_id
+            ]
         ]);
 
-        self::recalculateInnings($innings->id);
+        MatchEngine::replay($matchId);
 
-        $ball->refresh();
+        $projectedBall = Ball::find($id);
 
+        $match->refresh();
         \App\Events\MatchUpdated::dispatchSafe($match);
 
-        return response()->json($ball);
+        return response()->json($projectedBall);
     }
 
+    /**
+     * Undo a ball event.
+     */
+    public function destroy(Request $request, $id)
+    {
+        $oldBall = Ball::findOrFail($id);
+        $innings = Innings::findOrFail($oldBall->innings_id);
+        $match = CricketMatch::findOrFail($innings->match_id);
+        $matchId = $match->id;
+
+        if ($match->status === 'past') {
+            return response()->json(['message' => 'Scoring is locked for this match.'], 422);
+        }
+
+        if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
+            return response()->json(['message' => 'You are not authorized to score this match.'], 403);
+        }
+
+        $nextSeq = BallEvent::where('match_id', $matchId)->max('sequence_number') + 1;
+
+        BallEvent::create([
+            'event_uuid' => (string) Str::uuid(),
+            'event_type' => 'UNDO_EVENT',
+            'sequence_number' => $nextSeq,
+            'match_id' => $matchId,
+            'innings_no' => $innings->innings_no,
+            'scorer_id' => $request->user()->id,
+            'device_timestamp' => round(microtime(true) * 1000),
+            'metadata' => [
+                'target_event_uuid' => $id
+            ]
+        ]);
+
+        MatchEngine::replay($matchId);
+
+        $match->refresh();
+        \App\Events\MatchUpdated::dispatchSafe($match);
+
+        return response()->json(['message' => 'Ball deleted successfully.']);
+    }
+
+    /**
+     * Sync over deliveries.
+     */
     public function syncOver(Request $request, $matchId)
     {
         $request->validate([
@@ -351,66 +242,214 @@ class BallController extends Controller
         ]);
 
         $match = CricketMatch::findOrFail($matchId);
+        if ($match->status === 'past') {
+            return response()->json(['message' => 'Scoring is locked for this match.'], 422);
+        }
         if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
             return response()->json(['message' => 'You are not authorized to score this match.'], 403);
         }
 
-        try {
-            $scoringService = new \App\Services\ScoringService();
-            $scoringService->syncOver($matchId, $request->all());
+        DB::transaction(function () use ($matchId, $request, $match) {
+            $inningsNo = $request->innings_no;
+            $overNo = $request->over_no;
+            $bowlerId = $request->bowler_id;
+            $deliveries = $request->deliveries;
 
-            $updatedMatch = CricketMatch::findOrFail($matchId);
-            \App\Events\MatchUpdated::dispatchSafe($updatedMatch);
+            $innings = Innings::where('match_id', $matchId)
+                ->where('innings_no', $inningsNo)
+                ->first();
 
-            return response()->json(['message' => 'Over synced successfully.']);
-        } catch (\App\Exceptions\ScoringException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
+            if (!$innings) {
+                // Auto create innings in replay/sync if missing
+                $innings = Innings::create([
+                    'match_id' => $matchId,
+                    'innings_no' => $inningsNo,
+                    'batting_team_id' => ($inningsNo === 1) ? $match->batting_first_id : (($match->batting_first_id === $match->team_a_id) ? $match->team_b_id : $match->team_a_id),
+                    'bowling_team_id' => ($inningsNo === 1) ? (($match->batting_first_id === $match->team_a_id) ? $match->team_b_id : $match->team_a_id) : $match->batting_first_id
+                ]);
+            }
+
+            foreach ($deliveries as $del) {
+                // If this ball event already exists, skip it to remain idempotent
+                if (BallEvent::where('event_uuid', $del['id'])->exists()) {
+                    continue;
+                }
+
+                $nextSeq = BallEvent::where('match_id', $matchId)->max('sequence_number') + 1;
+
+                BallEvent::create([
+                    'event_uuid' => $del['id'],
+                    'event_type' => 'BALL_EVENT',
+                    'sequence_number' => $nextSeq,
+                    'match_id' => $matchId,
+                    'innings_no' => $inningsNo,
+                    'over_no' => $overNo,
+                    'ball_no' => $del['ball_in_over'],
+                    'striker_id' => $del['batter_id'],
+                    'non_striker_id' => $del['non_striker_id'] ?? null,
+                    'bowler_id' => $bowlerId,
+                    'batting_team_id' => $innings->batting_team_id,
+                    'bowling_team_id' => $innings->bowling_team_id,
+                    'runs_off_bat' => $del['runs'] ?? 0,
+                    'extras' => $del['extra_runs'] ?? 0,
+                    'extra_type' => $del['extra_type'] ?? null,
+                    'wicket' => !empty($del['is_wicket']),
+                    'wicket_type' => $del['wicket_type'] ?? null,
+                    'dismissed_player_id' => !empty($del['is_wicket']) ? (($del['wicket_type'] ?? '') === 'run_out' ? $del['non_striker_id'] : $del['batter_id']) : null,
+                    'legal_delivery' => !empty($del['is_legal']),
+                    'scorer_id' => $request->user()->id,
+                    'device_timestamp' => round(microtime(true) * 1000),
+                    'metadata' => [
+                        'caught_by_id' => $del['caught_by_id'] ?? null
+                    ]
+                ]);
+            }
+
+            MatchEngine::replay($matchId);
+        });
+
+        $updatedMatch = CricketMatch::findOrFail($matchId);
+        \App\Events\MatchUpdated::dispatchSafe($updatedMatch);
+
+        return response()->json(['message' => 'Over synced successfully.']);
     }
 
-    public function destroy(Request $request, $id)
+    /**
+     * Get all ball events for a match.
+     */
+    public function getEvents($matchId)
     {
-        $ball = Ball::findOrFail($id);
-        $innings = Innings::findOrFail($ball->innings_id);
-        $match = CricketMatch::findOrFail($innings->match_id);
+        $events = BallEvent::where('match_id', $matchId)
+            ->orderBy('sequence_number', 'asc')
+            ->get();
+        return response()->json($events);
+    }
 
+    /**
+     * Universal log events endpoint.
+     */
+    public function logEvent(Request $request, $matchId)
+    {
+        $match = CricketMatch::findOrFail($matchId);
+        if ($match->status === 'past') {
+            return response()->json(['message' => 'Scoring is locked for this match.'], 422);
+        }
         if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
             return response()->json(['message' => 'You are not authorized to score this match.'], 403);
         }
 
-        \Illuminate\Support\Facades\DB::beginTransaction();
-        try {
-            // Lock innings row
-            $innings = Innings::where('id', $innings->id)->lockForUpdate()->firstOrFail();
+        $request->validate([
+            'event_type' => 'required|string',
+            'innings_no' => 'required|integer',
+            'over_no' => 'nullable|integer',
+            'ball_no' => 'nullable|integer',
+            'striker_id' => 'nullable|uuid',
+            'non_striker_id' => 'nullable|uuid',
+            'bowler_id' => 'nullable|uuid',
+            'runs_off_bat' => 'nullable|integer',
+            'extras' => 'nullable|integer',
+            'extra_type' => 'nullable|string',
+            'wicket' => 'nullable|boolean',
+            'wicket_type' => 'nullable|string',
+            'dismissed_player_id' => 'nullable|uuid',
+            'legal_delivery' => 'nullable|boolean',
+            'metadata' => 'nullable|array'
+        ]);
 
-            // Validate that only the latest delivery can be undone
-            $lastBall = Ball::where('innings_id', $innings->id)->orderBy('ball_index', 'desc')->first();
-            if ($lastBall && $lastBall->id !== $ball->id) {
-                return response()->json(['message' => 'Only the latest delivery can be undone.'], 422);
-            }
+        $eventUuid = (string) Str::uuid();
+        $nextSeq = BallEvent::where('match_id', $matchId)->max('sequence_number') + 1;
 
-            if ($ball->is_wicket && $ball->wicket_type === 'caught' && $ball->caught_by_id) {
-                $catcher = Player::find($ball->caught_by_id);
-                if ($catcher) {
-                    $catcher->decrement('catches');
-                }
-            }
+        BallEvent::create([
+            'event_uuid' => $eventUuid,
+            'event_type' => $request->event_type,
+            'sequence_number' => $nextSeq,
+            'match_id' => $matchId,
+            'innings_no' => $request->innings_no,
+            'over_no' => $request->over_no,
+            'ball_no' => $request->ball_no,
+            'striker_id' => $request->striker_id,
+            'non_striker_id' => $request->non_striker_id,
+            'bowler_id' => $request->bowler_id,
+            'runs_off_bat' => $request->runs_off_bat ?? 0,
+            'extras' => $request->extras ?? 0,
+            'extra_type' => $request->extra_type,
+            'wicket' => $request->wicket ?? false,
+            'wicket_type' => $request->wicket_type,
+            'dismissed_player_id' => $request->dismissed_player_id,
+            'legal_delivery' => $request->legal_delivery ?? true,
+            'scorer_id' => $request->user()->id,
+            'device_timestamp' => round(microtime(true) * 1000),
+            'metadata' => $request->metadata
+        ]);
 
-            // Shift ball_index to a negative value to prevent unique key conflicts on sync re-attempts
-            $ball->ball_index = -($ball->ball_index + 1);
-            $ball->save();
-            $ball->delete(); // Soft delete
+        MatchEngine::replay($matchId);
 
-            self::recalculateInnings($innings->id);
+        $match->refresh();
+        \App\Events\MatchUpdated::dispatchSafe($match);
 
-            \Illuminate\Support\Facades\DB::commit();
+        return response()->json(MatchSummary::find($matchId));
+    }
 
-            \App\Events\MatchUpdated::dispatchSafe($match);
+    /**
+     * Batch sync event log from client.
+     */
+    public function syncEvents(Request $request, $matchId)
+    {
+        $request->validate([
+            'events' => 'required|array',
+            'events.*.event_uuid' => 'required|uuid',
+            'events.*.event_type' => 'required|string',
+            'events.*.sequence_number' => 'required|integer',
+            'events.*.innings_no' => 'required|integer',
+            'events.*.device_timestamp' => 'required|integer',
+        ]);
 
-            return response()->json(['message' => 'Ball deleted successfully.']);
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\DB::rollBack();
-            return response()->json(['message' => $e->getMessage()], 500);
+        $match = CricketMatch::findOrFail($matchId);
+        if ($match->status === 'past') {
+            return response()->json(['message' => 'Scoring is locked for this match.'], 422);
         }
+        if ($request->user()->role !== 'admin' && $match->created_by !== $request->user()->id) {
+            return response()->json(['message' => 'You are not authorized to score this match.'], 403);
+        }
+
+        DB::transaction(function () use ($matchId, $request) {
+            foreach ($request->events as $evt) {
+                if (BallEvent::where('event_uuid', $evt['event_uuid'])->exists()) {
+                    continue;
+                }
+
+                BallEvent::create([
+                    'event_uuid' => $evt['event_uuid'],
+                    'event_type' => $evt['event_type'],
+                    'sequence_number' => $evt['sequence_number'],
+                    'match_id' => $matchId,
+                    'innings_no' => $evt['innings_no'],
+                    'over_no' => $evt['over_no'] ?? null,
+                    'ball_no' => $evt['ball_no'] ?? null,
+                    'striker_id' => $evt['striker_id'] ?? null,
+                    'non_striker_id' => $evt['non_striker_id'] ?? null,
+                    'bowler_id' => $evt['bowler_id'] ?? null,
+                    'batting_team_id' => $evt['batting_team_id'] ?? null,
+                    'bowling_team_id' => $evt['bowling_team_id'] ?? null,
+                    'runs_off_bat' => $evt['runs_off_bat'] ?? 0,
+                    'extras' => $evt['extras'] ?? 0,
+                    'extra_type' => $evt['extra_type'] ?? null,
+                    'wicket' => $evt['wicket'] ?? false,
+                    'wicket_type' => $evt['wicket_type'] ?? null,
+                    'dismissed_player_id' => $evt['dismissed_player_id'] ?? null,
+                    'legal_delivery' => $evt['legal_delivery'] ?? true,
+                    'scorer_id' => $request->user()->id,
+                    'device_timestamp' => $evt['device_timestamp'],
+                    'metadata' => $evt['metadata'] ?? null,
+                ]);
+            }
+
+            MatchEngine::replay($matchId);
+        });
+
+        $updatedMatch = CricketMatch::findOrFail($matchId);
+        \App\Events\MatchUpdated::dispatchSafe($updatedMatch);
+
+        return response()->json(['message' => 'Events synced successfully.']);
     }
 }

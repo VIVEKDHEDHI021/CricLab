@@ -68,12 +68,18 @@ Route::middleware(['auth:sanctum', 'force_password_change'])->group(function () 
         Route::patch('/innings/{id}/close', [InningsController::class, 'closeInnings']);
         Route::post('/innings/{inningsId}/balls', [BallController::class, 'store']);
         Route::post('/matches/{matchId}/overs/sync', [BallController::class, 'syncOver']);
+        Route::post('/matches/{matchId}/events', [BallController::class, 'logEvent']);
+        Route::get('/matches/{matchId}/events', [BallController::class, 'getEvents']);
+        Route::post('/matches/{matchId}/events/sync', [BallController::class, 'syncEvents']);
         Route::delete('/balls/{id}', [BallController::class, 'destroy']);
         Route::put('/balls/{id}', [BallController::class, 'update']);
         Route::patch('/matches/{id}/end', [MatchController::class, 'end']);
         Route::put('/matches/{id}', [MatchController::class, 'update']);
         Route::post('/matches/{id}/replace-player', [MatchController::class, 'replacePlayer']);
+        Route::put('/matches/{id}/squad', [MatchController::class, 'updateSquad']);
         Route::get('/matches/{matchId}/sync-status', [MatchController::class, 'syncStatus']);
+        Route::post('/matches/{matchId}/audit-logs/sync', [MatchController::class, 'syncAuditLogs']);
+        Route::get('/matches/{matchId}/audit-logs', [MatchController::class, 'getAuditLogs']);
     });
 
     // Friend connections

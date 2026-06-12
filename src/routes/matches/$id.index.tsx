@@ -81,6 +81,107 @@ function MatchDetails() {
   const [submittingReplace, setSubmittingReplace] = useState(false);
   const [replaceSearchQuery, setReplaceSearchQuery] = useState("");
 
+  // Match Squad states & freeze check
+  const isMatchFrozen = useMemo(() => {
+    return m?.status !== "upcoming" || (balls && balls.length > 0);
+  }, [m?.status, balls]);
+
+  const [isGuest, setIsGuest] = useState(false);
+  const [guestRole, setGuestRole] = useState("batsman");
+  const [guestJersey, setGuestJersey] = useState("");
+
+  const [isEditPlayerModalOpen, setIsEditPlayerModalOpen] = useState(false);
+  const [editingSquadPlayer, setEditingSquadPlayer] = useState<any>(null);
+  const [editPlayerName, setEditPlayerName] = useState("");
+  const [editPlayerJersey, setEditPlayerJersey] = useState("");
+  const [editPlayerRole, setEditPlayerRole] = useState("batsman");
+  const [editPlayerCaptain, setEditPlayerCaptain] = useState(false);
+  const [editPlayerKeeper, setEditPlayerKeeper] = useState(false);
+  const [submittingEditPlayer, setSubmittingEditPlayer] = useState(false);
+
+  const updateMatchSquad = async (newSquadA: any[], newSquadB: any[]) => {
+    const formatSquad = (sq: any[]) => sq.map(p => ({
+      player_id: p.id || p.player_id,
+      display_name: p.name || p.display_name,
+      role: p.role || null,
+      jersey_number: p.jersey_number || null,
+      captain: !!p.captain,
+      wicket_keeper: !!p.wicket_keeper,
+      is_guest: !!p.is_guest,
+    }));
+
+    await matchService.updateSquad(id, formatSquad(newSquadA), formatSquad(newSquadB));
+    queryClient.invalidateQueries({ queryKey: ["match", id] });
+  };
+
+  const handleEditPlayerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editPlayerName.trim()) return toast.error("Player name is required");
+    setSubmittingEditPlayer(true);
+
+    try {
+      const updatedSquadA = teamAPlayers.map((p: any) => {
+        if (p.id === editingSquadPlayer.id) {
+          return {
+            ...p,
+            name: editPlayerName.trim(),
+            jersey_number: editPlayerJersey.trim(),
+            role: editPlayerRole,
+            captain: editPlayerCaptain,
+            wicket_keeper: editPlayerKeeper,
+          };
+        }
+        const updatedProps: any = {};
+        if (editPlayerCaptain && p.team_id === editingSquadPlayer.team_id) {
+          updatedProps.captain = false;
+        }
+        if (editPlayerKeeper && p.team_id === editingSquadPlayer.team_id) {
+          updatedProps.wicket_keeper = false;
+        }
+        return { ...p, ...updatedProps };
+      });
+
+      const updatedSquadB = teamBPlayers.map((p: any) => {
+        if (p.id === editingSquadPlayer.id) {
+          return {
+            ...p,
+            name: editPlayerName.trim(),
+            jersey_number: editPlayerJersey.trim(),
+            role: editPlayerRole,
+            captain: editPlayerCaptain,
+            wicket_keeper: editPlayerKeeper,
+          };
+        }
+        const updatedProps: any = {};
+        if (editPlayerCaptain && p.team_id === editingSquadPlayer.team_id) {
+          updatedProps.captain = false;
+        }
+        if (editPlayerKeeper && p.team_id === editingSquadPlayer.team_id) {
+          updatedProps.wicket_keeper = false;
+        }
+        return { ...p, ...updatedProps };
+      });
+
+      await updateMatchSquad(updatedSquadA, updatedSquadB);
+      toast.success("Player details updated successfully");
+      setIsEditPlayerModalOpen(false);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || "Failed to update player details");
+    } finally {
+      setSubmittingEditPlayer(false);
+    }
+  };
+
+  const openEditPlayerModal = (player: any) => {
+    setEditingSquadPlayer(player);
+    setEditPlayerName(player.name || player.display_name || "");
+    setEditPlayerJersey(player.jersey_number || "");
+    setEditPlayerRole(player.role || "batsman");
+    setEditPlayerCaptain(!!player.captain);
+    setEditPlayerKeeper(!!player.wicket_keeper);
+    setIsEditPlayerModalOpen(true);
+  };
+
   const handleSaveOvers = async (e: React.FormEvent) => {
     e.preventDefault();
     if (inputOvers < 1 || inputOvers > 50) {
@@ -430,6 +531,9 @@ function MatchDetails() {
     setPlayerSearchQuery("");
     setPlayerMobile("");
     setSelectedExistingPlayer(null);
+    setIsGuest(false);
+    setGuestRole("batsman");
+    setGuestJersey("");
     setIsAddPlayerModalOpen(true);
   };
 
@@ -445,27 +549,60 @@ function MatchDetails() {
     setSubmittingPlayer(true);
 
     try {
-      if (selectedExistingPlayer) {
-        // Move existing player to team
-        await playerService.updatePlayerProfile(selectedExistingPlayer.id, {
+      let playerToAdd: any = null;
+
+      if (isGuest) {
+        const guestId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        playerToAdd = {
+          id: guestId,
+          name: playerSearchQuery.trim(),
           team_id: targetTeamId,
-          name: playerSearchQuery,
-          mobile: playerMobile || undefined,
-        });
-        toast.success(`Assigned ${playerSearchQuery} to team`);
+          role: guestRole,
+          jersey_number: guestJersey.trim(),
+          captain: false,
+          wicket_keeper: false,
+          is_guest: true,
+        };
+      } else if (selectedExistingPlayer) {
+        playerToAdd = {
+          id: selectedExistingPlayer.id,
+          name: selectedExistingPlayer.name,
+          team_id: targetTeamId,
+          role: selectedExistingPlayer.role || "batsman",
+          jersey_number: selectedExistingPlayer.jersey_number || "",
+          captain: false,
+          wicket_keeper: false,
+          is_guest: false,
+        };
       } else {
-        // Create brand new player
-        await playerService.createPlayer({
-          name: playerSearchQuery,
+        const newGlobalPlayer = await playerService.createPlayer({
+          name: playerSearchQuery.trim(),
           team_id: targetTeamId,
-          mobile: playerMobile || undefined,
+          mobile: playerMobile.trim() || undefined,
         });
-        toast.success(`Created new player ${playerSearchQuery}`);
+        playerToAdd = {
+          id: newGlobalPlayer.id,
+          name: newGlobalPlayer.name,
+          team_id: targetTeamId,
+          role: "Player",
+          jersey_number: "",
+          captain: false,
+          wicket_keeper: false,
+          is_guest: false,
+        };
       }
 
-      // Refresh data
-      queryClient.invalidateQueries({ queryKey: ["match", id] });
-      loadAppPlayers();
+      const currentSquadA = [...teamAPlayers];
+      const currentSquadB = [...teamBPlayers];
+
+      if (targetTeamId === m.team_a_id) {
+        currentSquadA.push(playerToAdd);
+      } else {
+        currentSquadB.push(playerToAdd);
+      }
+
+      await updateMatchSquad(currentSquadA, currentSquadB);
+      toast.success(`Added ${playerToAdd.name} to squad`);
       setIsAddPlayerModalOpen(false);
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || "Failed to add player");
@@ -478,12 +615,11 @@ function MatchDetails() {
     if (!confirm(`Are you sure you want to remove ${playerName} from this squad?`)) return;
 
     try {
-      await playerService.updatePlayerProfile(playerId, {
-        team_id: null as any,
-      });
+      const currentSquadA = teamAPlayers.filter((p: any) => p.id !== playerId);
+      const currentSquadB = teamBPlayers.filter((p: any) => p.id !== playerId);
+
+      await updateMatchSquad(currentSquadA, currentSquadB);
       toast.success(`Removed ${playerName} from the squad`);
-      queryClient.invalidateQueries({ queryKey: ["match", id] });
-      loadAppPlayers();
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || "Failed to remove player");
     }
@@ -1077,11 +1213,18 @@ function MatchDetails() {
       {/* SQUADS TAB CONTENT */}
       {activeTab === "squads" && (
         <div className="space-y-4">
+          {isMatchFrozen && (
+            <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-600 dark:text-yellow-400 p-3 rounded-xl text-xs font-semibold flex items-center gap-2">
+              <span>🔒</span>
+              <span>Squad is locked because scoring has already started.</span>
+            </div>
+          )}
+
           {/* Team A Squad */}
           <Card className="p-4 rounded-2xl border-border bg-card">
             <div className="flex justify-between items-center mb-3">
               <h4 className="font-semibold text-sm text-primary">{teamName(m.team_a_id)}</h4>
-              {(canManage || (user && m.created_by === user.id)) && (
+              {(canManage || (user && m.created_by === user.id)) && !isMatchFrozen && (
                 <Button size="sm" variant="outline" className="h-8 px-2.5 gap-1" onClick={() => openAddPlayerModal(m.team_a_id)}>
                   <Plus className="h-3.5 w-3.5" /> Add Player
                 </Button>
@@ -1091,11 +1234,42 @@ function MatchDetails() {
               {teamAPlayers.map((p: any) => (
                 <div key={p.id} className="py-2 flex justify-between items-center text-sm">
                   <div className="flex flex-col">
-                    <span className="font-semibold">{p.name} {p.jersey_number ? `(${p.jersey_number})` : ""}</span>
+                    <span className="font-semibold flex items-center gap-1.5 flex-wrap">
+                      {p.name}
+                      {p.jersey_number ? (
+                        <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground font-mono">
+                          #{p.jersey_number}
+                        </span>
+                      ) : null}
+                      {p.captain ? (
+                        <span className="text-[9px] bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 px-1 py-0.5 rounded font-black uppercase">
+                          C
+                        </span>
+                      ) : null}
+                      {p.wicket_keeper ? (
+                        <span className="text-[9px] bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded font-black uppercase">
+                          WK
+                        </span>
+                      ) : null}
+                      {p.is_guest ? (
+                        <span className="text-[9px] bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400 px-1 py-0.5 rounded font-black uppercase">
+                          Guest
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="text-[10px] text-muted-foreground uppercase">{p.role || "Player"}</span>
                   </div>
-                  {(canManage || (user && m.created_by === user.id)) && (
+                  {(canManage || (user && m.created_by === user.id)) && !isMatchFrozen && (
                     <div className="flex items-center gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-primary shrink-0 rounded-full"
+                        onClick={() => openEditPlayerModal(p)}
+                        title="Edit player details"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                      </Button>
                       <Button
                         size="icon"
                         variant="ghost"
@@ -1128,7 +1302,7 @@ function MatchDetails() {
           <Card className="p-4 rounded-2xl border-border bg-card">
             <div className="flex justify-between items-center mb-3">
               <h4 className="font-semibold text-sm text-primary">{teamName(m.team_b_id)}</h4>
-              {(canManage || (user && m.created_by === user.id)) && (
+              {(canManage || (user && m.created_by === user.id)) && !isMatchFrozen && (
                 <Button size="sm" variant="outline" className="h-8 px-2.5 gap-1" onClick={() => openAddPlayerModal(m.team_b_id)}>
                   <Plus className="h-3.5 w-3.5" /> Add Player
                 </Button>
@@ -1138,11 +1312,42 @@ function MatchDetails() {
               {teamBPlayers.map((p: any) => (
                 <div key={p.id} className="py-2 flex justify-between items-center text-sm">
                   <div className="flex flex-col">
-                    <span className="font-semibold">{p.name} {p.jersey_number ? `(${p.jersey_number})` : ""}</span>
+                    <span className="font-semibold flex items-center gap-1.5 flex-wrap">
+                      {p.name}
+                      {p.jersey_number ? (
+                        <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground font-mono">
+                          #{p.jersey_number}
+                        </span>
+                      ) : null}
+                      {p.captain ? (
+                        <span className="text-[9px] bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 px-1 py-0.5 rounded font-black uppercase">
+                          C
+                        </span>
+                      ) : null}
+                      {p.wicket_keeper ? (
+                        <span className="text-[9px] bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 px-1 py-0.5 rounded font-black uppercase">
+                          WK
+                        </span>
+                      ) : null}
+                      {p.is_guest ? (
+                        <span className="text-[9px] bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400 px-1 py-0.5 rounded font-black uppercase">
+                          Guest
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="text-[10px] text-muted-foreground uppercase">{p.role || "Player"}</span>
                   </div>
-                  {(canManage || (user && m.created_by === user.id)) && (
+                  {(canManage || (user && m.created_by === user.id)) && !isMatchFrozen && (
                     <div className="flex items-center gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-muted-foreground hover:text-primary shrink-0 rounded-full"
+                        onClick={() => openEditPlayerModal(p)}
+                        title="Edit player details"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                      </Button>
                       <Button
                         size="icon"
                         variant="ghost"
@@ -1328,132 +1533,198 @@ function MatchDetails() {
           </DialogHeader>
           <form onSubmit={handleAddPlayerSubmit} className="space-y-4 py-2">
             
-            {/* Select Existing Player Dropdown */}
-            <div className="space-y-1.5">
-              <Label>Select Existing Player</Label>
-              <select
-                value={selectedExistingPlayer?.id || ""}
+            {/* Guest Player Toggle Checkbox */}
+            <div className="flex items-center space-x-2 bg-muted/20 p-2.5 rounded-xl border border-border/40">
+              <input
+                type="checkbox"
+                id="is-guest-checkbox"
+                checked={isGuest}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === "") {
+                  setIsGuest(e.target.checked);
+                  if (e.target.checked) {
                     setSelectedExistingPlayer(null);
-                    setPlayerSearchQuery("");
-                    setPlayerMobile("");
-                  } else {
-                    const found = allAppPlayers.find(p => p.id === val);
-                    if (found) {
-                      handleSelectRecommendation(found);
-                    }
                   }
                 }}
-                className="w-full h-10 px-3 py-2 text-xs border border-border bg-background rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="">-- Select from existing players --</option>
-                {allAppPlayers
-                  .filter(p => p.team_id !== targetTeamId)
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} {p.mobile ? `(${p.mobile})` : ""} {p.team_name ? `[Team: ${p.team_name}]` : "[No Team]"}
-                    </option>
-                  ))}
-              </select>
-              <p className="text-[10px] text-muted-foreground">
-                Quickly select a player from the database to add or transfer to this squad.
-              </p>
-            </div>
-
-            <div className="relative flex py-1 items-center">
-              <div className="flex-grow border-t border-border/60"></div>
-              <span className="flex-shrink mx-4 text-muted-foreground text-[10px] font-bold uppercase tracking-wider">Or Create New</span>
-              <div className="flex-grow border-t border-border/60"></div>
-            </div>
-
-            {/* Player Search Input */}
-            <div className="space-y-1 relative">
-              <Label htmlFor="player-search">Player Name</Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="player-search"
-                  value={playerSearchQuery}
-                  onChange={(e) => {
-                    setPlayerSearchQuery(e.target.value);
-                    if (selectedExistingPlayer && e.target.value !== selectedExistingPlayer.name) {
-                      setSelectedExistingPlayer(null); // Clear selection if user edits manually
-                    }
-                  }}
-                  placeholder="Type player name or mobile number"
-                  required
-                  className="pl-9 bg-background border-border"
-                  autoComplete="off"
-                />
-              </div>
-
-              {/* Recommendations list */}
-              {filteredRecommendations.length > 0 && !selectedExistingPlayer && (
-                <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-xl shadow-xl divide-y divide-border overflow-hidden">
-                  <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/40">
-                    Existing Profiles Found:
-                  </div>
-                  {filteredRecommendations.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => handleSelectRecommendation(p)}
-                      className="w-full px-3 py-2 text-left text-sm hover:bg-primary/10 transition-colors flex items-center justify-between"
-                    >
-                      <div>
-                        <div className="font-semibold text-primary">{p.name}</div>
-                        {p.mobile && <div className="text-xs text-muted-foreground">Mobile: {p.mobile}</div>}
-                      </div>
-                      <div className="text-xs text-muted-foreground text-right">
-                        <div>{p.role || "Player"}</div>
-                        {p.team_name && <div className="italic">Team: {p.team_name}</div>}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Existing profile indicator */}
-            {selectedExistingPlayer && (
-              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs flex items-start gap-2">
-                <User className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <div>
-                  <span className="font-bold">Link Profile Selected:</span> Matches {selectedExistingPlayer.name}.
-                  {selectedExistingPlayer.team_name ? ` Will move them from "${selectedExistingPlayer.team_name}" to "${teamName(targetTeamId)}".` : ` Will assign them to "${teamName(targetTeamId)}".`}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedExistingPlayer(null);
-                      setPlayerSearchQuery("");
-                      setPlayerMobile("");
-                    }}
-                    className="block text-primary underline mt-1 font-semibold"
-                  >
-                    Clear selection / Create new profile
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Mobile field (only requested if creating new or linked) */}
-            <div className="space-y-1">
-              <Label htmlFor="player-mobile">Mobile Number (Optional)</Label>
-              <Input
-                id="player-mobile"
-                value={playerMobile}
-                onChange={(e) => setPlayerMobile(e.target.value)}
-                placeholder="Enter 10-digit number"
-                className="bg-background border-border"
-                type="tel"
-                pattern="[0-9]{10}"
+                className="rounded border-border bg-background text-primary focus:ring-primary h-4 w-4"
               />
-              <p className="text-[10px] text-muted-foreground">
-                If they have a registered account, adding their mobile number will auto-link stats to their account.
-              </p>
+              <Label htmlFor="is-guest-checkbox" className="text-xs font-semibold cursor-pointer">
+                Register as Guest Player (Match-only, not saved globally)
+              </Label>
             </div>
+
+            {!isGuest ? (
+              <>
+                {/* Select Existing Player Dropdown */}
+                <div className="space-y-1.5">
+                  <Label>Select Existing Player</Label>
+                  <select
+                    value={selectedExistingPlayer?.id || ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "") {
+                        setSelectedExistingPlayer(null);
+                        setPlayerSearchQuery("");
+                        setPlayerMobile("");
+                      } else {
+                        const found = allAppPlayers.find(p => p.id === val);
+                        if (found) {
+                          handleSelectRecommendation(found);
+                        }
+                      }
+                    }}
+                    className="w-full h-10 px-3 py-2 text-xs border border-border bg-background rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="">-- Select from existing players --</option>
+                    {allAppPlayers
+                      .filter(p => p.team_id !== targetTeamId)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {p.mobile ? `(${p.mobile})` : ""} {p.team_name ? `[Team: ${p.team_name}]` : "[No Team]"}
+                        </option>
+                      ))}
+                  </select>
+                  <p className="text-[10px] text-muted-foreground">
+                    Quickly select a player from the database to add or transfer to this squad.
+                  </p>
+                </div>
+
+                <div className="relative flex py-1 items-center">
+                  <div className="flex-grow border-t border-border/60"></div>
+                  <span className="flex-shrink mx-4 text-muted-foreground text-[10px] font-bold uppercase tracking-wider">Or Create New</span>
+                  <div className="flex-grow border-t border-border/60"></div>
+                </div>
+
+                {/* Player Search Input */}
+                <div className="space-y-1 relative">
+                  <Label htmlFor="player-search">Player Name</Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="player-search"
+                      value={playerSearchQuery}
+                      onChange={(e) => {
+                        setPlayerSearchQuery(e.target.value);
+                        if (selectedExistingPlayer && e.target.value !== selectedExistingPlayer.name) {
+                          setSelectedExistingPlayer(null);
+                        }
+                      }}
+                      placeholder="Type player name or mobile number"
+                      required
+                      className="pl-9 bg-background border-border"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Recommendations list */}
+                  {filteredRecommendations.length > 0 && !selectedExistingPlayer && (
+                    <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-xl shadow-xl divide-y divide-border overflow-hidden">
+                      <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/40">
+                        Existing Profiles Found:
+                      </div>
+                      {filteredRecommendations.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => handleSelectRecommendation(p)}
+                          className="w-full px-3 py-2 text-left text-sm hover:bg-primary/10 transition-colors flex items-center justify-between"
+                        >
+                          <div>
+                            <div className="font-semibold text-primary">{p.name}</div>
+                            {p.mobile && <div className="text-xs text-muted-foreground">Mobile: {p.mobile}</div>}
+                          </div>
+                          <div className="text-xs text-muted-foreground text-right">
+                            <div>{p.role || "Player"}</div>
+                            {p.team_name && <div className="italic">Team: {p.team_name}</div>}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Existing profile indicator */}
+                {selectedExistingPlayer && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-xs flex items-start gap-2">
+                    <User className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <span className="font-bold">Link Profile Selected:</span> Matches {selectedExistingPlayer.name}.
+                      {selectedExistingPlayer.team_name ? ` Will move them from "${selectedExistingPlayer.team_name}" to "${teamName(targetTeamId)}".` : ` Will assign them to "${teamName(targetTeamId)}".`}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedExistingPlayer(null);
+                          setPlayerSearchQuery("");
+                          setPlayerMobile("");
+                        }}
+                        className="block text-primary underline mt-1 font-semibold"
+                      >
+                        Clear selection / Create new profile
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Mobile field (only requested if creating new or linked) */}
+                <div className="space-y-1">
+                  <Label htmlFor="player-mobile">Mobile Number (Optional)</Label>
+                  <Input
+                    id="player-mobile"
+                    value={playerMobile}
+                    onChange={(e) => setPlayerMobile(e.target.value)}
+                    placeholder="Enter 10-digit number"
+                    className="bg-background border-border"
+                    type="tel"
+                    pattern="[0-9]{10}"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    If they have a registered account, adding their mobile number will auto-link stats to their account.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Guest specific name, role, jersey fields */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="guest-name">Guest Player Name</Label>
+                  <Input
+                    id="guest-name"
+                    value={playerSearchQuery}
+                    onChange={(e) => setPlayerSearchQuery(e.target.value)}
+                    placeholder="Enter player name"
+                    required
+                    className="bg-background border-border"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="guest-jersey">Jersey Number (Optional)</Label>
+                    <Input
+                      id="guest-jersey"
+                      value={guestJersey}
+                      onChange={(e) => setGuestJersey(e.target.value)}
+                      placeholder="e.g. 7"
+                      className="bg-background border-border"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="guest-role">Role</Label>
+                    <select
+                      id="guest-role"
+                      value={guestRole}
+                      onChange={(e) => setGuestRole(e.target.value)}
+                      className="w-full h-10 px-3 py-2 text-xs border border-border bg-background rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="batsman">Batsman</option>
+                      <option value="bowler">Bowler</option>
+                      <option value="all-rounder">All-Rounder</option>
+                      <option value="wicket-keeper">Wicket-Keeper</option>
+                    </select>
+                  </div>
+                </div>
+              </>
+            )}
 
             <DialogFooter className="pt-2">
               <Button type="button" variant="outline" onClick={() => setIsAddPlayerModalOpen(false)}>
@@ -1464,6 +1735,8 @@ function MatchDetails() {
                   <span className="flex items-center gap-1.5">
                     <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Adding...
                   </span>
+                ) : isGuest ? (
+                  "Add Guest"
                 ) : selectedExistingPlayer ? (
                   "Assign Profile"
                 ) : (
@@ -1472,6 +1745,98 @@ function MatchDetails() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Player Details Dialog Modal */}
+      <Dialog open={isEditPlayerModalOpen} onOpenChange={setIsEditPlayerModalOpen}>
+        <DialogContent className="max-w-md bg-card border-border text-foreground">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold">Edit Player Details</DialogTitle>
+          </DialogHeader>
+          {editingSquadPlayer && (
+            <form onSubmit={handleEditPlayerSubmit} className="space-y-4 py-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-player-name">Player Name</Label>
+                <Input
+                  id="edit-player-name"
+                  value={editPlayerName}
+                  onChange={(e) => setEditPlayerName(e.target.value)}
+                  required
+                  className="bg-background border-border"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-player-jersey">Jersey Number (Optional)</Label>
+                <Input
+                  id="edit-player-jersey"
+                  value={editPlayerJersey}
+                  onChange={(e) => setEditPlayerJersey(e.target.value)}
+                  placeholder="e.g. 10"
+                  className="bg-background border-border"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-player-role">Role</Label>
+                <select
+                  id="edit-player-role"
+                  value={editPlayerRole}
+                  onChange={(e) => setEditPlayerRole(e.target.value)}
+                  className="w-full h-10 px-3 py-2 text-xs border border-border bg-background rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="batsman">Batsman</option>
+                  <option value="bowler">Bowler</option>
+                  <option value="all-rounder">All-Rounder</option>
+                  <option value="wicket-keeper">Wicket-Keeper</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-2 pt-2">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="edit-player-captain"
+                    checked={editPlayerCaptain}
+                    onChange={(e) => setEditPlayerCaptain(e.target.checked)}
+                    className="rounded border-border bg-background text-primary focus:ring-primary h-4 w-4"
+                  />
+                  <Label htmlFor="edit-player-captain" className="text-xs font-semibold cursor-pointer">
+                    Team Captain (C)
+                  </Label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="edit-player-keeper"
+                    checked={editPlayerKeeper}
+                    onChange={(e) => setEditPlayerKeeper(e.target.checked)}
+                    className="rounded border-border bg-background text-primary focus:ring-primary h-4 w-4"
+                  />
+                  <Label htmlFor="edit-player-keeper" className="text-xs font-semibold cursor-pointer">
+                    Wicket Keeper (WK)
+                  </Label>
+                </div>
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button type="button" variant="outline" onClick={() => setIsEditPlayerModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={submittingEditPlayer}>
+                  {submittingEditPlayer ? (
+                    <span className="flex items-center gap-1.5">
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Saving...
+                    </span>
+                  ) : (
+                    "Save Changes"
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
 

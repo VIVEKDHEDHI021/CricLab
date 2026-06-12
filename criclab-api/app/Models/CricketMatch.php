@@ -58,4 +58,18 @@ class CricketMatch extends Model
     {
         return $this->belongsTo(Player::class, 'man_of_the_match_id')->withTrashed();
     }
+
+    public function squads()
+    {
+        return $this->hasMany(MatchSquad::class, 'match_id');
+    }
+
+    public function isFrozen(): bool
+    {
+        if ($this->status === 'live' || $this->status === 'past') {
+            return true;
+        }
+
+        return BallEvent::where('match_id', $this->id)->exists();
+    }
 }
