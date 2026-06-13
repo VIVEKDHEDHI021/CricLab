@@ -4549,7 +4549,19 @@ function LiveScoring() {
 
                     <div className="space-y-2">
                       <label className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block">Extra Type</label>
-                      <Select value={editExtraType} onValueChange={setEditExtraType}>
+                      <Select
+                        value={editExtraType}
+                        onValueChange={(v) => {
+                          setEditExtraType(v);
+                          if (v === "wide") {
+                            setEditExtraRuns(serverMatch?.wide_run ?? 1);
+                          } else if (v === "no_ball") {
+                            setEditExtraRuns(serverMatch?.noball_run ?? 1);
+                          } else if (v === "none") {
+                            setEditExtraRuns(0);
+                          }
+                        }}
+                      >
                         <SelectTrigger className="w-full h-10 text-xs border-border bg-card text-foreground">
                           <SelectValue placeholder="Extra Type" />
                         </SelectTrigger>

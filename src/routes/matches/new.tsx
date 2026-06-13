@@ -247,11 +247,33 @@ function NewMatch() {
   // 2) any players with other team IDs imported manually
   // 3) guest players
   const availablePlayersA = useMemo(() => {
-    return [...allPlayers];
+    return allPlayers.filter(p => {
+      const name = p.name.toLowerCase();
+      const role = (p.role || "").toLowerCase();
+      return !(
+        name.includes("admin") ||
+        name.includes("scorer") ||
+        name.includes("dummy") ||
+        name.includes("test") ||
+        role.includes("admin") ||
+        role.includes("scorer")
+      );
+    });
   }, [allPlayers]);
 
   const availablePlayersB = useMemo(() => {
-    return [...allPlayers];
+    return allPlayers.filter(p => {
+      const name = p.name.toLowerCase();
+      const role = (p.role || "").toLowerCase();
+      return !(
+        name.includes("admin") ||
+        name.includes("scorer") ||
+        name.includes("dummy") ||
+        name.includes("test") ||
+        role.includes("admin") ||
+        role.includes("scorer")
+      );
+    });
   }, [allPlayers]);
 
   // Filter lists based on search
@@ -397,6 +419,7 @@ function NewMatch() {
     setSelectedPlayersA(prev => 
       prev.includes(playerId) ? prev.filter(id => id !== playerId) : [...prev, playerId]
     );
+    setSearchA("");
   };
 
   const togglePlayerBSelection = (playerId: string) => {
@@ -408,6 +431,7 @@ function NewMatch() {
     setSelectedPlayersB(prev => 
       prev.includes(playerId) ? prev.filter(id => id !== playerId) : [...prev, playerId]
     );
+    setSearchB("");
   };
 
   // Bulk selectors
@@ -764,7 +788,7 @@ function NewMatch() {
           <span className="text-sm text-muted-foreground font-semibold">Loading setup configs...</span>
         </div>
       ) : (
-        <>
+        <div className="pb-28">
           {/* STEP 1: MATCH SETTINGS & TEAM NAMING */}
           {step === 1 && (
             <div className="space-y-6">
@@ -1032,13 +1056,17 @@ function NewMatch() {
                 </div>
               </div>
 
-              <Button
-                type="button"
-                onClick={handleStep1Submit}
-                className="w-full h-12 font-bold text-sm gap-2 shadow-lg shadow-primary/20"
-              >
-                Proceed to Squad Selection <ArrowRight className="h-4 w-4" />
-              </Button>
+              <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-md border-t border-border/80 p-4 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+                <div className="max-w-xl mx-auto">
+                  <Button
+                    type="button"
+                    onClick={handleStep1Submit}
+                    className="w-full h-12 font-bold text-sm gap-2 shadow-lg shadow-primary/20"
+                  >
+                    Proceed to Squad Selection <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1272,6 +1300,36 @@ function NewMatch() {
                           >
                             Assign Role
                           </button>
+
+                          {/* Direct Captain Toggle Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const newRoles = rosterTab === "a" ? { ...rolesA } : { ...rolesB };
+                              if (newRoles[p.id] === "Captain") {
+                                newRoles[p.id] = "";
+                              } else {
+                                // Clear other Captains in this team
+                                Object.keys(newRoles).forEach(k => {
+                                  if (newRoles[k] === "Captain") newRoles[k] = "";
+                                });
+                                newRoles[p.id] = "Captain";
+                              }
+                              if (rosterTab === "a") {
+                                setRolesA(newRoles);
+                              } else {
+                                setRolesB(newRoles);
+                              }
+                            }}
+                            className={`text-[9px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 transition-all ${
+                              roleVal === "Captain"
+                                ? "bg-primary text-primary-foreground border-primary"
+                                : "bg-muted text-muted-foreground border-border hover:bg-primary/10 hover:text-primary hover:border-primary/20"
+                            }`}
+                          >
+                            <Crown className="h-2.5 w-2.5" /> Captain
+                          </button>
                         </div>
                       )}
 
@@ -1286,23 +1344,25 @@ function NewMatch() {
                 })}
               </div>
 
-              {/* Roster validation & Navigation controls */}
-              <div className="flex gap-4 pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setStep(1)}
-                  className="h-12 w-28 font-bold gap-1.5"
-                >
-                  <ArrowLeft className="h-4 w-4" /> Back
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleProceedToReview}
-                  className="h-12 flex-1 font-bold gap-1.5"
-                >
-                  Continue to Review <ArrowRight className="h-4 w-4" />
-                </Button>
+              {/* Roster validation & Navigation controls - Sticky bottom bar */}
+              <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-md border-t border-border/80 p-4 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+                <div className="max-w-xl mx-auto flex gap-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setStep(1)}
+                    className="h-12 w-28 font-bold gap-1.5"
+                  >
+                    <ArrowLeft className="h-4 w-4" /> Back
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleProceedToReview}
+                    className="h-12 flex-1 font-bold gap-1.5"
+                  >
+                    Continue to Review <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </div>
           )}
@@ -1479,37 +1539,39 @@ function NewMatch() {
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex gap-4 pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setStep(2)}
-                  className="h-12 w-28 font-bold gap-1.5"
-                  disabled={isStartingMatch}
-                >
-                  <ArrowLeft className="h-4 w-4" /> Back
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleStartMatch}
-                  className="h-12 flex-1 font-bold gap-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white shadow-lg shadow-orange-500/20"
-                  disabled={isStartingMatch}
-                >
-                  {isStartingMatch ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin text-primary-foreground" /> Initializing Match...
-                    </>
-                  ) : (
-                    <>
-                      ⚡ Start Match & Begin Scoring
-                    </>
-                  )}
-                </Button>
+              {/* Action Buttons - Sticky bottom bar */}
+              <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-md border-t border-border/80 p-4 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+                <div className="max-w-xl mx-auto flex gap-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setStep(2)}
+                    className="h-12 w-28 font-bold gap-1.5"
+                    disabled={isStartingMatch}
+                  >
+                    <ArrowLeft className="h-4 w-4" /> Back
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleStartMatch}
+                    className="h-12 flex-1 font-bold gap-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white shadow-lg shadow-orange-500/20"
+                    disabled={isStartingMatch}
+                  >
+                    {isStartingMatch ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin text-primary-foreground" /> Initializing Match...
+                      </>
+                    ) : (
+                      <>
+                        ⚡ Start Match & Begin Scoring
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
           )}
-        </>
+        </div>
       )}
 
       {/* Guest Player Modal */}
