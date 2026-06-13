@@ -25,7 +25,7 @@ export const Route = createFileRoute("/")({
 });
 
 function LoginPage() {
-  const { user, role: currentRole, loading } = useAuth();
+  const { user, role: currentRole, loading, setAuthUser } = useAuth();
   const nav = useNavigate();
 
   // Form states
@@ -95,6 +95,7 @@ function LoginPage() {
       
       setToken(token);
       updateEchoAuth();
+      setAuthUser(loggedUser);
       
       if (rememberMe) {
         localStorage.setItem("criclab_remembered_mobile", mobile);
