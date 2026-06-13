@@ -1,6 +1,14 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+let API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
+if (typeof window !== 'undefined') {
+  const hostname = window.location.hostname;
+  // Force relative /api path in live environments to utilize the Cloudflare Worker proxy and bypass CORS preflights
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1' && !hostname.startsWith('192.168.')) {
+    API_URL = '/api';
+  }
+}
 
 const api = axios.create({
   baseURL: API_URL,

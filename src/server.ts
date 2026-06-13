@@ -55,13 +55,15 @@ async function proxyApiRequest(request: Request, env: any): Promise<Response> {
   // Handle CORS preflight OPTIONS requests directly at the edge to avoid preflight overhead/failures
   if (request.method === "OPTIONS") {
     console.log(`[CF Worker] Handling preflight OPTIONS request for ${url.pathname}`);
+    const origin = request.headers.get("origin") || `${url.protocol}//${url.host}`;
+    const reqHeaders = request.headers.get("Access-Control-Request-Headers") || "Content-Type, Authorization, Accept, X-Requested-With";
     return new Response(null, {
       status: 204,
       headers: {
-        "Access-Control-Allow-Origin": request.headers.get("origin") || "*",
+        "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Requested-With",
+        "Access-Control-Allow-Headers": reqHeaders,
         "Access-Control-Max-Age": "86400",
       },
     });
@@ -110,10 +112,12 @@ async function proxyApiRequest(request: Request, env: any): Promise<Response> {
 
     // Prepare response headers, extending/overriding CORS headers to prevent cross-origin blocks
     const responseHeaders = new Headers(response.headers);
-    responseHeaders.set("Access-Control-Allow-Origin", request.headers.get("origin") || "*");
+    const origin = request.headers.get("origin") || `${url.protocol}//${url.host}`;
+    const reqHeaders = request.headers.get("Access-Control-Request-Headers") || "Content-Type, Authorization, Accept, X-Requested-With";
+    responseHeaders.set("Access-Control-Allow-Origin", origin);
     responseHeaders.set("Access-Control-Allow-Credentials", "true");
     responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
-    responseHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-Requested-With");
+    responseHeaders.set("Access-Control-Allow-Headers", reqHeaders);
 
     return new Response(response.body, {
       status: response.status,
@@ -123,6 +127,7 @@ async function proxyApiRequest(request: Request, env: any): Promise<Response> {
   } catch (error: any) {
     clearTimeout(timeoutId);
     const duration = Date.now() - startTime;
+    const origin = request.headers.get("origin") || `${url.protocol}//${url.host}`;
 
     if (error.name === "AbortError") {
       console.error(`[CF Worker] API Request to ${targetUrl} timed out after ${duration}ms`);
@@ -135,7 +140,7 @@ async function proxyApiRequest(request: Request, env: any): Promise<Response> {
           status: 544,
           headers: {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": request.headers.get("origin") || "*",
+            "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Credentials": "true",
           },
         }
@@ -152,7 +157,7 @@ async function proxyApiRequest(request: Request, env: any): Promise<Response> {
         status: 502,
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": request.headers.get("origin") || "*",
+          "Access-Control-Allow-Origin": origin,
           "Access-Control-Allow-Credentials": "true",
         },
       }
