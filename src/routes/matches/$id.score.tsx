@@ -496,32 +496,31 @@ function LiveScoring() {
 
       try {
         const serverEvts = await ballService.getEvents(id);
-        for (const e of serverEvts) {
-          await indexedDbService.saveBallEvent({
-            event_uuid: e.event_uuid,
-            event_type: e.event_type,
-            sequence_number: e.sequence_number,
-            match_id: e.match_id,
-            innings_no: e.innings_no,
-            over_no: e.over_no,
-            ball_no: e.ball_no,
-            striker_id: e.striker_id,
-            non_striker_id: e.non_striker_id,
-            bowler_id: e.bowler_id,
-            batting_team_id: e.batting_team_id,
-            bowling_team_id: e.bowling_team_id,
-            runs_off_bat: e.runs_off_bat,
-            extras: e.extras,
-            extra_type: e.extra_type,
-            wicket: e.wicket,
-            wicket_type: e.wicket_type,
-            dismissed_player_id: e.dismissed_player_id,
-            legal_delivery: e.legal_delivery,
-            scorer_id: e.scorer_id,
-            device_timestamp: e.device_timestamp,
-            metadata: typeof e.metadata === 'string' ? JSON.parse(e.metadata) : e.metadata
-          });
-        }
+        const mappedEvts = serverEvts.map((e) => ({
+          event_uuid: e.event_uuid,
+          event_type: e.event_type,
+          sequence_number: e.sequence_number,
+          match_id: e.match_id,
+          innings_no: e.innings_no,
+          over_no: e.over_no,
+          ball_no: e.ball_no,
+          striker_id: e.striker_id,
+          non_striker_id: e.non_striker_id,
+          bowler_id: e.bowler_id,
+          batting_team_id: e.batting_team_id,
+          bowling_team_id: e.bowling_team_id,
+          runs_off_bat: e.runs_off_bat,
+          extras: e.extras,
+          extra_type: e.extra_type,
+          wicket: e.wicket,
+          wicket_type: e.wicket_type,
+          dismissed_player_id: e.dismissed_player_id,
+          legal_delivery: e.legal_delivery,
+          scorer_id: e.scorer_id,
+          device_timestamp: e.device_timestamp,
+          metadata: typeof e.metadata === 'string' ? JSON.parse(e.metadata) : e.metadata
+        }));
+        await indexedDbService.saveBallEventsBatch(mappedEvts);
       } catch (evtErr) {
         console.warn("Could not pull match events from server:", evtErr);
       }
@@ -897,21 +896,22 @@ function LiveScoring() {
       const local = await indexedDbService.getBallEvents(id);
       const unsynced = local.filter((e) => e.metadata?.synced === false);
 
+      let didSync = false;
+
       if (unsynced.length > 0) {
+        didSync = true;
         await logAudit('sync_attempt', `Attempting to sync ${unsynced.length} pending scoring event(s) to backend.`);
 
         try {
           await ballService.syncEvents(id, unsynced);
-          for (const event of unsynced) {
-            const updatedEvent = {
-              ...event,
-              metadata: {
-                ...event.metadata,
-                synced: true
-              }
-            };
-            await indexedDbService.saveBallEvent(updatedEvent);
-          }
+          const updatedEvents = unsynced.map(event => ({
+            ...event,
+            metadata: {
+              ...event.metadata,
+              synced: true
+            }
+          }));
+          await indexedDbService.saveBallEventsBatch(updatedEvents);
         } catch (err: any) {
           console.error("Batch sync failed", err);
           await logAudit('sync_failure', `Sync failed: ${err.message || "Network error"}`);
@@ -922,17 +922,21 @@ function LiveScoring() {
       // Sync unsynced audit logs
       const unsyncedLogs = await indexedDbService.getUnsyncedAuditLogs(id);
       if (unsyncedLogs.length > 0) {
+        didSync = true;
         try {
           await matchService.syncAuditLogs(id, unsyncedLogs.map(({ synced, ...rest }) => rest));
-          for (const log of unsyncedLogs) {
-            await indexedDbService.saveAuditLog({ ...log, synced: true });
-          }
+          const updatedLogs = unsyncedLogs.map(log => ({ ...log, synced: true }));
+          await indexedDbService.saveAuditLogsBatch(updatedLogs);
         } catch (err) {
           console.error("Failed to sync audit logs", err);
         }
       }
 
-      await reload();
+      // Only perform costly server reloads and audit logs merge if a synchronization actually took place
+      if (didSync) {
+        await reload();
+      }
+
       const updatedLocal = await indexedDbService.getBallEvents(id);
       const hasPending = updatedLocal.some((e) => e.metadata?.synced === false);
       setHasUnsyncedEvents(hasPending);
@@ -940,20 +944,22 @@ function LiveScoring() {
         setBypassSyncLock(false);
       }
 
-      // Reload merged audit logs
-      try {
-        const serverLogs = await matchService.getAuditLogs(id);
-        const localLogs = await indexedDbService.getAuditLogs(id);
-        const merged = [...serverLogs];
-        localLogs.forEach((ll) => {
-          if (!merged.some((sl) => sl.id === ll.id)) {
-            merged.push(ll);
-          }
-        });
-        setAuditLogs(merged.sort((a, b) => b.device_timestamp - a.device_timestamp));
-      } catch {
-        const localLogs = await indexedDbService.getAuditLogs(id);
-        setAuditLogs(localLogs.sort((a, b) => b.device_timestamp - a.device_timestamp));
+      if (didSync) {
+        // Reload merged audit logs
+        try {
+          const serverLogs = await matchService.getAuditLogs(id);
+          const localLogs = await indexedDbService.getAuditLogs(id);
+          const merged = [...serverLogs];
+          localLogs.forEach((ll) => {
+            if (!merged.some((sl) => sl.id === ll.id)) {
+              merged.push(ll);
+            }
+          });
+          setAuditLogs(merged.sort((a, b) => b.device_timestamp - a.device_timestamp));
+        } catch {
+          const localLogs = await indexedDbService.getAuditLogs(id);
+          setAuditLogs(localLogs.sort((a, b) => b.device_timestamp - a.device_timestamp));
+        }
       }
     } catch (err: any) {
       console.error("Sync loop failed", err);

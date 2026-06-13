@@ -243,6 +243,34 @@ class IndexedDbService {
     });
   }
 
+  async saveBallEventsBatch(events: BallEventData[]): Promise<void> {
+    if (events.length === 0) return;
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('ball_events', 'readwrite');
+      const store = tx.objectStore('ball_events');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      for (const event of events) {
+        store.put(event);
+      }
+    });
+  }
+
+  async saveAuditLogsBatch(logs: any[]): Promise<void> {
+    if (logs.length === 0) return;
+    const db = await this.initDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('audit_logs', 'readwrite');
+      const store = tx.objectStore('audit_logs');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      for (const log of logs) {
+        store.put(log);
+      }
+    });
+  }
+
   // Deliveries Operations (Legacy - for compatibility)
   async saveDelivery(delivery: BallEvent): Promise<void> {
     const db = await this.initDb();
