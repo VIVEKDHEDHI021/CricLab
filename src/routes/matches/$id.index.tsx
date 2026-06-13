@@ -15,7 +15,9 @@ import { ballService } from "@/lib/services/ballService";
 import { echoClient, updateEchoAuth } from "@/lib/echo";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import { Plus, User, Search, RefreshCw, Trash2 } from "lucide-react";
+import { Plus, User, Search, RefreshCw, Trash2, AlertCircle } from "lucide-react";
+import { indexedDbService } from "@/lib/services/indexedDbService";
+import { matchEngine, type BallEventData } from "@/lib/services/matchEngine";
 
 export const Route = createFileRoute("/matches/$id/")({ component: MatchDetails });
 
@@ -31,6 +33,8 @@ function MatchDetails() {
   const { data, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ["match", id],
     queryFn: () => matchService.getMatch(id),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     refetchInterval: (query) => {
       const matchData = query.state.data as any;
       const status = matchData?.m?.status;
@@ -38,7 +42,99 @@ function MatchDetails() {
     }
   });
 
-  const { m, teams, innings, players, balls } = (data || {}) as any;
+  // Local events for optimistic consistency with the scoring page
+  const [localEvents, setLocalEvents] = useState<BallEventData[]>([]);
+  const [hasUnsynced, setHasUnsynced] = useState(false);
+
+  useEffect(() => {
+    const loadLocal = async () => {
+      try {
+        const events = await indexedDbService.getBallEvents(id);
+        setLocalEvents(events);
+        const queue = await indexedDbService.getSyncQueue(id);
+        setHasUnsynced(queue.some(q => q.status === 'pending'));
+      } catch (e) {
+        // ignore – offline or no IndexedDB support
+      }
+    };
+    loadLocal();
+    // Poll local events every 2 seconds so this page stays in sync with scoring page
+    const interval = setInterval(loadLocal, 2000);
+    return () => clearInterval(interval);
+  }, [id]);
+
+  const { m, teams, innings: serverInnings, players, balls: serverBalls } = (data || {}) as any;
+
+  // --- Optimistic State (same as scoring page) ---
+  // Apply local events on top of server state so the scoreboard stays
+  // consistent with the live scoring page even when there are unsynced events.
+  const derivedState = useMemo(() => {
+    if (!m || !localEvents || localEvents.length === 0) return null;
+    try {
+      return matchEngine.replay(localEvents, {
+        id: m.id,
+        team_a_id: m.team_a_id,
+        team_b_id: m.team_b_id,
+        batting_first_id: m.batting_first_id,
+        overs: m.overs,
+        wide_run: m.wide_run ?? 1,
+        noball_run: m.noball_run ?? 1,
+        last_man_batting: m.last_man_batting ?? false,
+        squad_a_ids: m.squad_a_ids ?? [],
+        squad_b_ids: m.squad_b_ids ?? [],
+      });
+    } catch (e) {
+      return null;
+    }
+  }, [m, localEvents]);
+
+  // Merge server innings with optimistic derived state
+  const innings = useMemo(() => {
+    if (!serverInnings) return [];
+    if (!derivedState) return serverInnings;
+    return serverInnings.map((inn: any) => {
+      const derived = derivedState.innings[inn.innings_no];
+      if (derived) {
+        return {
+          ...inn,
+          runs: derived.runs,
+          wickets: derived.wickets,
+          legal_balls: derived.legal_balls,
+          is_closed: derived.is_closed,
+        };
+      }
+      return inn;
+    });
+  }, [serverInnings, derivedState]);
+
+  // Merge balls: use derived balls when available (they reflect local events)
+  const balls = useMemo(() => {
+    if (!serverInnings || !serverBalls) return [];
+    if (!derivedState || derivedState.balls.length === 0) return serverBalls;
+    // Map derived balls back to the same shape as server balls, using innings_id from server
+    return derivedState.balls.map((b: any) => {
+      const inn = (serverInnings ?? []).find((i: any) => i.innings_no === b.innings_no);
+      return {
+        id: b.id,
+        innings_id: inn?.id ?? `local_inn_${b.innings_no}`,
+        match_id: m.id,
+        ball_index: b.ball_index,
+        over_number: b.over_number,
+        ball_in_over: b.ball_in_over,
+        batter_id: b.batter_id,
+        non_striker_id: b.non_striker_id,
+        bowler_id: b.bowler_id,
+        runs: b.runs,
+        extra_runs: b.extra_runs,
+        extra_type: b.extra_type,
+        is_wicket: b.is_wicket,
+        wicket_type: b.wicket_type,
+        is_legal: b.is_legal,
+        caught_by_id: b.caught_by_id,
+        created_at: new Date().toISOString(),
+      };
+    });
+  }, [serverBalls, derivedState, serverInnings, m]);
 
   const [activeTab, setActiveTab] = useState<"live" | "scorecard" | "squads" | "overs">(() => {
     if (typeof window !== "undefined") {
@@ -883,6 +979,13 @@ function MatchDetails() {
 
               return (
                 <div className="space-y-3">
+                  {/* Unsynced indicator */}
+                  {hasUnsynced && (
+                    <div className="flex items-center gap-2 text-xs bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 px-3 py-2 rounded-xl font-semibold">
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                      <span>Showing live local data — syncing to server in background</span>
+                    </div>
+                  )}
                   {/* Big Score Card */}
                   <Card className="p-4 rounded-2xl bg-card border-border flex flex-col justify-center items-center text-center">
                     <div className="text-xs font-bold text-primary uppercase tracking-wider mb-1">
