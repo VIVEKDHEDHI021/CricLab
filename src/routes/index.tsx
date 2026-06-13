@@ -4,11 +4,12 @@ import { authService } from "@/lib/services/authService";
 import { setToken, getToken } from "@/lib/api";
 import { useAuth, Role } from "@/hooks/useAuth";
 import { updateEchoAuth } from "@/lib/echo";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -17,18 +18,45 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { Eye, EyeOff, Lock, Smartphone, Award, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: LoginPage,
 });
 
 function LoginPage() {
-  const { user, role, loading } = useAuth();
+  const { user, role: currentRole, loading } = useAuth();
   const nav = useNavigate();
 
+  // Form states
+  const [role, setRole] = useState<Role>("user");
+  const [mobile, setMobile] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // Forgot password states
+  const [isForgotOpen, setIsForgotOpen] = useState(false);
+  const [forgotMobile, setForgotMobile] = useState("");
+  const [forgotBusy, setForgotBusy] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState("");
+
   useEffect(() => {
-    if (!loading && user && role) nav({ to: "/dashboard" });
-  }, [user, role, loading, nav]);
+    if (!loading && user && currentRole) {
+      nav({ to: "/dashboard" });
+    }
+  }, [user, currentRole, loading, nav]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const remembered = localStorage.getItem("criclab_remembered_mobile");
+      if (remembered) {
+        setMobile(remembered);
+        setRememberMe(true);
+      }
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -39,48 +67,6 @@ function LoginPage() {
       </div>
     );
   }
-
-  return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <header className="px-4 py-5 border-b border-border">
-        <h1 className="text-2xl font-bold tracking-tight text-center">
-          <span className="text-primary">Cric</span>Lab
-        </h1>
-      </header>
-      <main className="flex-1 flex items-center justify-center px-4 py-10">
-        <Card className="w-full max-w-md p-5 bg-card border-border rounded-2xl">
-          <Tabs defaultValue="user" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 mb-4">
-              <TabsTrigger value="user">User</TabsTrigger>
-              <TabsTrigger value="scorer">Scorer</TabsTrigger>
-              <TabsTrigger value="admin">Admin</TabsTrigger>
-            </TabsList>
-            <TabsContent value="user"><AuthForm expectedRole="user" /></TabsContent>
-            <TabsContent value="scorer"><AuthForm expectedRole="scorer" /></TabsContent>
-            <TabsContent value="admin">
-              <AuthForm expectedRole="admin" />
-              <AdminRegisterDialog />
-            </TabsContent>
-          </Tabs>
-        </Card>
-      </main>
-    </div>
-  );
-}
-
-function AuthForm({ expectedRole }: { expectedRole: Role }) {
-  const [mobile, setMobile] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const nav = useNavigate();
-  const { refreshRole, setAuthUser } = useAuth();
-  const [gsiLoaded, setGsiLoaded] = useState(false);
-
-  // Forgot password states
-  const [isForgotOpen, setIsForgotOpen] = useState(false);
-  const [forgotMobile, setForgotMobile] = useState("");
-  const [forgotBusy, setForgotBusy] = useState(false);
-  const [forgotMessage, setForgotMessage] = useState("");
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,248 +83,229 @@ function AuthForm({ expectedRole }: { expectedRole: Role }) {
     }
   };
 
-  useEffect(() => {
-    const handleScriptLoad = () => setGsiLoaded(true);
-    
-    if (window.google) {
-      setGsiLoaded(true);
-    } else {
-      const script = document.createElement("script");
-      script.src = "https://accounts.google.com/gsi/client";
-      script.async = true;
-      script.defer = true;
-      script.onload = handleScriptLoad;
-      document.body.appendChild(script);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (gsiLoaded && window.google && !getToken()) {
-      const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-      if (!clientId) return;
-
-      window.google.accounts.id.initialize({
-        client_id: clientId,
-        auto_select: true,
-        callback: async (response: any) => {
-          setBusy(true);
-          try {
-            const { token, user } = await authService.loginWithGoogle(response.credential);
-            setToken(token);
-            updateEchoAuth();
-            setAuthUser(user);
-            toast.success("Signed in with Google");
-            nav({ to: "/dashboard" });
-          } catch (err: any) {
-            const message = err.response?.data?.message || err.message || "Google Sign-in failed";
-            toast.error(message);
-          } finally {
-            setBusy(false);
-          }
-        },
-      });
-
-      const timer = setTimeout(() => {
-        const btnEl = document.getElementById(`google-btn-${expectedRole}`);
-        if (btnEl && window.google) {
-          window.google.accounts.id.renderButton(
-            btnEl,
-            { theme: "outline", size: "large", text: "signin_with", shape: "rectangular", width: 350 }
-          );
-          window.google.accounts.id.prompt();
-        }
-      }, 50);
-
-      return () => clearTimeout(timer);
-    }
-  }, [gsiLoaded, expectedRole]);
-
-  const handleFallbackClick = () => {
-    toast.error("Google Client ID is missing. Please add VITE_GOOGLE_CLIENT_ID to your environment variables (.env.production or Render config).", {
-      duration: 6000
-    });
-  };
-
-  const [retryCount, setRetryCount] = useState(0);
-
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!mobile.trim() || !password) {
-      console.warn("[Login] Auth blocked: missing credentials.");
       return toast.error("Mobile and password required");
     }
 
-    console.log(`[Login] Sign In button clicked. Role: ${expectedRole}. Attempt #${retryCount + 1}`);
-    console.log("[Login] Request initiation. Payload:", { mobile, expectedRole });
-    
     setBusy(true);
     try {
-      const { token, user } = await authService.login(mobile, password, expectedRole ?? "user");
-      console.log("[Login] API response received successfully:", {
-        hasToken: !!token,
-        userId: user?.id,
-        role: user?.role
-      });
+      const { token, user: loggedUser } = await authService.login(mobile, password, role ?? "user");
       
       setToken(token);
       updateEchoAuth();
-      setAuthUser(user);
+      
+      if (rememberMe) {
+        localStorage.setItem("criclab_remembered_mobile", mobile);
+      } else {
+        localStorage.removeItem("criclab_remembered_mobile");
+      }
       
       toast.success("Signed in successfully!");
-      console.log("[Login] Attempting redirect to /dashboard...");
       nav({ to: "/dashboard" });
     } catch (err: any) {
-      console.error("[Login] Exception occurred during auth flow:", err);
-      
       let message = "Authentication failed. Please check your connection and try again.";
       if (err.code === "ECONNABORTED" || err.message?.includes("timeout")) {
         message = "Connection timed out. The backend API is taking too long to respond. Please try again.";
       } else if (err.response) {
-        console.warn("[Login] API returned error status:", err.response.status, err.response.data);
         message = err.response.data?.message || `Auth failed: ${err.response.statusText}`;
       } else if (err.request) {
-        console.error("[Login] Network Error - no response received:", err.request);
         message = "Network Error: Cannot connect to the server. Please check if your backend is online.";
       } else {
         message = err.message || message;
       }
-      
-      toast.error(message, {
-        action: {
-          label: "Retry",
-          onClick: () => {
-            setRetryCount(prev => prev + 1);
-            setTimeout(() => {
-              const formEl = document.getElementById(`login-form-${expectedRole}`);
-              if (formEl) {
-                formEl.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-              }
-            }, 100);
-          }
-        }
-      });
+      toast.error(message);
     } finally {
-      console.log("[Login] Resetting loading state (busy = false)");
       setBusy(false);
     }
   };
 
   return (
-    <div className="space-y-4">
-      <form id={`login-form-${expectedRole}`} onSubmit={submit} className="space-y-3">
-        <div className="space-y-1">
-          <Label htmlFor={`mobile-${expectedRole}`}>Mobile number</Label>
-          <Input
-            id={`mobile-${expectedRole}`}
-            inputMode="tel"
-            autoComplete="tel"
-            value={mobile}
-            onChange={(e) => setMobile(e.target.value)}
-            placeholder="9876543210"
-          />
-        </div>
-        <div className="space-y-1">
-          <div className="flex justify-between items-center">
-            <Label htmlFor={`pw-${expectedRole}`}>Password</Label>
-            <button
-              type="button"
-              className="text-xs text-primary hover:underline"
-              onClick={() => {
-                setForgotMessage("");
-                setForgotMobile("");
-                setIsForgotOpen(true);
-              }}
-            >
-              Forgot Password?
-            </button>
+    <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col relative overflow-hidden">
+      {/* Background gradients */}
+      <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full bg-primary/10 blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-amber-500/5 blur-[120px] pointer-events-none" />
+
+      <header className="px-4 py-8 flex justify-center items-center">
+        <div className="flex items-center gap-2">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary to-orange-500 flex items-center justify-center shadow-lg shadow-primary/20">
+            <Award className="h-6 w-6 text-slate-950 font-black" />
           </div>
-          <Input
-            id={`pw-${expectedRole}`}
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          <h1 className="text-2xl font-black tracking-tight">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-orange-400">Cric</span>Lab
+          </h1>
         </div>
-        <Button type="submit" className="w-full" disabled={busy}>
-          {busy ? "Please wait…" : "Sign in"}
-        </Button>
-      </form>
+      </header>
+
+      <main className="flex-1 flex items-center justify-center px-4 pb-16">
+        <Card className="w-full max-w-md p-6 bg-slate-900/60 backdrop-blur-md border-slate-800 rounded-3xl shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-primary via-orange-500 to-amber-500" />
+          
+          <div className="text-center mb-6">
+            <h2 className="text-xl font-bold text-slate-100">Welcome Back</h2>
+            <p className="text-xs text-slate-400 mt-1">Please log in to manage your cricket matches</p>
+          </div>
+
+          <div className="space-y-4">
+            {/* Role Selection Tabs */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Login Role</Label>
+              <Tabs value={role || "user"} onValueChange={(val) => setRole(val as Role)} className="w-full">
+                <TabsList className="grid w-full grid-cols-3 bg-slate-950 border border-slate-800/80 p-1 rounded-xl animate-fade-in">
+                  <TabsTrigger value="user" className="data-[state=active]:bg-primary data-[state=active]:text-slate-950 font-bold transition-all text-xs">User</TabsTrigger>
+                  <TabsTrigger value="scorer" className="data-[state=active]:bg-primary data-[state=active]:text-slate-950 font-bold transition-all text-xs">Scorer</TabsTrigger>
+                  <TabsTrigger value="admin" className="data-[state=active]:bg-primary data-[state=active]:text-slate-950 font-bold transition-all text-xs">Admin</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+
+            <form onSubmit={submit} className="space-y-4">
+              {/* Mobile Field */}
+              <div className="space-y-1.5">
+                <Label htmlFor="mobile" className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Mobile Number</Label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                    <Smartphone className="h-4 w-4" />
+                  </span>
+                  <Input
+                    id="mobile"
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    value={mobile}
+                    onChange={(e) => setMobile(e.target.value)}
+                    placeholder="9876543210"
+                    className="pl-10 h-11 bg-slate-950 border-slate-800 text-slate-100 rounded-xl focus-visible:ring-primary focus-visible:border-primary placeholder:text-slate-600 font-medium"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Password Field */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <Label htmlFor="password" className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Password</Label>
+                  <button
+                    type="button"
+                    className="text-xs text-primary hover:text-orange-400 transition font-medium"
+                    onClick={() => {
+                      setForgotMessage("");
+                      setForgotMobile("");
+                      setIsForgotOpen(true);
+                    }}
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                    <Lock className="h-4 w-4" />
+                  </span>
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••"
+                    className="pl-10 pr-10 h-11 bg-slate-950 border-slate-800 text-slate-100 rounded-xl focus-visible:ring-primary focus-visible:border-primary placeholder:text-slate-600 font-medium"
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-200 transition"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Remember Me */}
+              <div className="flex items-center space-x-2 py-1">
+                <Checkbox
+                  id="remember"
+                  checked={rememberMe}
+                  onCheckedChange={(checked) => setRememberMe(!!checked)}
+                  className="border-slate-700 data-[state=checked]:bg-primary data-[state=checked]:text-slate-950"
+                />
+                <Label htmlFor="remember" className="text-xs font-semibold text-slate-400 cursor-pointer select-none">
+                  Remember my mobile number
+                </Label>
+              </div>
+
+              {/* Submit Button */}
+              <Button
+                type="submit"
+                className="w-full h-11 rounded-xl bg-gradient-to-r from-primary to-orange-500 hover:from-primary hover:to-orange-600 text-slate-950 font-black tracking-wide uppercase shadow-lg shadow-primary/10 transition duration-300 active:scale-[0.98]"
+                disabled={busy}
+              >
+                {busy ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin animate-infinite" />
+                    Please wait…
+                  </span>
+                ) : (
+                  "Sign in"
+                )}
+              </Button>
+            </form>
+
+            {/* Admin Register dialog trigger */}
+            {role === "admin" && (
+              <div className="pt-2 border-t border-slate-800/80">
+                <AdminRegisterDialog />
+              </div>
+            )}
+
+            {role === "user" && (
+              <div className="text-center text-xs text-slate-400 pt-2 border-t border-slate-800/80">
+                <span>New to CricLab? </span>
+                <Link to="/register" className="text-primary hover:underline font-bold transition">
+                  Register here
+                </Link>
+              </div>
+            )}
+          </div>
+        </Card>
+      </main>
 
       <Dialog open={isForgotOpen} onOpenChange={setIsForgotOpen}>
-        <DialogContent className="max-w-md bg-card border-border text-foreground">
+        <DialogContent className="max-w-md bg-slate-900 border-slate-800 text-slate-100 rounded-3xl">
           <DialogHeader>
-            <DialogTitle>Forgot Password</DialogTitle>
+            <DialogTitle className="text-lg font-bold text-slate-100">Forgot Password</DialogTitle>
           </DialogHeader>
           {forgotMessage ? (
             <div className="space-y-4 py-4 text-center">
               <p className="text-sm font-semibold text-primary">{forgotMessage}</p>
-              <Button onClick={() => { setIsForgotOpen(false); setForgotMessage(""); setForgotMobile(""); }} className="w-full">
+              <Button onClick={() => { setIsForgotOpen(false); setForgotMessage(""); setForgotMobile(""); }} className="w-full h-10 rounded-xl bg-primary text-slate-950 font-bold">
                 Close
               </Button>
             </div>
           ) : (
             <form onSubmit={handleForgotPassword} className="space-y-4 py-2">
-              <div className="space-y-1">
-                <Label htmlFor="forgot-mobile">Registered Mobile Number</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="forgot-mobile" className="text-xs text-slate-400 font-semibold">Registered Mobile Number</Label>
                 <Input
                   id="forgot-mobile"
+                  type="tel"
                   inputMode="tel"
                   value={forgotMobile}
                   onChange={(e) => setForgotMobile(e.target.value)}
                   placeholder="e.g. 9876543210"
+                  className="h-11 bg-slate-950 border-slate-800 text-slate-100 rounded-xl"
                   required
                 />
               </div>
-              <Button type="submit" className="w-full" disabled={forgotBusy}>
+              <Button type="submit" className="w-full h-11 rounded-xl bg-primary text-slate-950 font-bold" disabled={forgotBusy}>
+                {forgotBusy ? <Loader2 className="h-4 w-4 animate-spin inline mr-2" /> : null}
                 {forgotBusy ? "Checking..." : "Submit"}
               </Button>
             </form>
           )}
         </DialogContent>
       </Dialog>
-
-      <div className="relative my-3">
-        <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t border-border" />
-        </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-card px-2 text-muted-foreground">Or</span>
-        </div>
-      </div>
-
-      {import.meta.env.VITE_GOOGLE_CLIENT_ID ? (
-        <div className="flex justify-center w-full min-h-[44px]" id={`google-btn-${expectedRole}`}></div>
-      ) : (
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full flex items-center justify-center gap-2 h-11"
-          onClick={handleFallbackClick}
-        >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
-            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
-          </svg>
-          Sign in with Google
-        </Button>
-      )}
-
-      {expectedRole === "user" && (
-        <div className="space-y-2 pt-1">
-          <p className="text-[11px] text-muted-foreground text-center">
-            Password reset is handled by an admin.
-          </p>
-          <div className="text-center text-xs border-t border-border/40 pt-2">
-            <span className="text-muted-foreground">New to CricLab? </span>
-            <Link to="/register" className="text-primary hover:underline font-semibold">
-              Register here
-            </Link>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -347,7 +314,7 @@ function AdminRegisterDialog() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const nav = useNavigate();
-  const { refreshRole, setAuthUser } = useAuth();
+  const { setAuthUser } = useAuth();
   const [form, setForm] = useState({
     name: "",
     username: "",
@@ -394,70 +361,77 @@ function AdminRegisterDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button type="button" variant="outline" className="w-full mt-3">
+        <Button type="button" variant="outline" className="w-full h-11 rounded-xl border-slate-800 text-slate-300 hover:bg-slate-800 transition font-bold mt-2">
           Register new admin
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto bg-slate-900 border-slate-800 text-slate-100 rounded-3xl">
         <DialogHeader>
-          <DialogTitle>Register admin account</DialogTitle>
+          <DialogTitle className="text-lg font-bold text-slate-100">Register admin account</DialogTitle>
         </DialogHeader>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-slate-400">
           You need the developer password set on the server (Render env:{" "}
-          <code className="text-primary">ADMIN_REGISTRATION_PASSWORD</code>).
+          <code className="text-primary font-bold">ADMIN_REGISTRATION_PASSWORD</code>).
         </p>
-        <form onSubmit={submit} className="space-y-3 mt-2">
+        <form onSubmit={submit} className="space-y-3.5 mt-4">
           <div className="space-y-1">
-            <Label>Full name</Label>
+            <Label className="text-slate-400 text-xs">Full name</Label>
             <Input
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="Your name"
+              className="h-10 bg-slate-950 border-slate-800 text-slate-100 rounded-xl"
             />
           </div>
           <div className="space-y-1">
-            <Label>Username</Label>
+            <Label className="text-slate-400 text-xs">Username</Label>
             <Input
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
               placeholder="admin_username"
+              className="h-10 bg-slate-950 border-slate-800 text-slate-100 rounded-xl"
             />
           </div>
           <div className="space-y-1">
-            <Label>Mobile number</Label>
+            <Label className="text-slate-400 text-xs">Mobile number</Label>
             <Input
               inputMode="tel"
               value={form.mobile}
               onChange={(e) => setForm({ ...form, mobile: e.target.value })}
               placeholder="9429442013"
+              className="h-10 bg-slate-950 border-slate-800 text-slate-100 rounded-xl"
             />
           </div>
           <div className="space-y-1">
-            <Label>Password</Label>
+            <Label className="text-slate-400 text-xs">Password</Label>
             <Input
               type="password"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
+              className="h-10 bg-slate-950 border-slate-800 text-slate-100 rounded-xl"
             />
           </div>
           <div className="space-y-1">
-            <Label>Confirm password</Label>
+            <Label className="text-slate-400 text-xs">Confirm password</Label>
             <Input
               type="password"
               value={form.password_confirmation}
               onChange={(e) => setForm({ ...form, password_confirmation: e.target.value })}
+              className="h-10 bg-slate-950 border-slate-800 text-slate-100 rounded-xl"
             />
           </div>
           <div className="space-y-1">
-            <Label>Developer password</Label>
+            <Label className="text-slate-400 text-xs">Developer password</Label>
             <Input
               type="password"
               value={form.developer_password}
               onChange={(e) => setForm({ ...form, developer_password: e.target.value })}
               placeholder="From server config"
+              className="h-10 bg-slate-950 border-slate-800 text-slate-100 rounded-xl"
             />
           </div>
-          <Button type="submit" className="w-full" disabled={busy}>
+          <Button type="submit" className="w-full h-11 bg-primary text-slate-950 font-bold rounded-xl mt-4" disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin inline mr-2" /> : null}
             {busy ? "Creating…" : "Create admin account"}
           </Button>
         </form>
