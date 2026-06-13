@@ -64,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadUser = async () => {
     try {
-      const me = await withTimeout(authService.getMe(), 5000, "Session verification timed out.");
+      const me = await withTimeout(authService.getMe(), 60000, "Session verification timed out.");
       setAuthUser(me);
     } catch (err: any) {
       setUser(null);

@@ -93,7 +93,7 @@ async function proxyApiRequest(request: Request, env: any): Promise<Response> {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds timeout
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds timeout
 
   try {
     const response = await fetch(targetUrl, {
@@ -128,7 +128,7 @@ async function proxyApiRequest(request: Request, env: any): Promise<Response> {
       console.error(`[CF Worker] API Request to ${targetUrl} timed out after ${duration}ms`);
       return new Response(
         JSON.stringify({
-          message: "Gateway Timeout: The backend API did not respond within 10 seconds.",
+          message: "Gateway Timeout: The backend API did not respond within 60 seconds.",
           error: "TIMEOUT",
         }),
         {
