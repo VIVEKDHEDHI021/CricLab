@@ -15,9 +15,12 @@ return new class extends Migration
         // 1. Clean up duplicate deliveries (keeping the oldest/first one)
         DB::table('balls')
             ->whereNotIn('id', function ($query) {
-                $query->select(DB::raw('MIN(id)'))
-                    ->from('balls')
-                    ->groupBy('innings_id', 'ball_index');
+                $query->select('min_id')
+                    ->from(function ($sub) {
+                        $sub->select(DB::raw('MIN(id) as min_id'))
+                            ->from('balls')
+                            ->groupBy('innings_id', 'ball_index');
+                    }, 'temp');
             })
             ->delete();
 
