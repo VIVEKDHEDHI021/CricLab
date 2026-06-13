@@ -31,8 +31,8 @@ COPY . .
 # Run Composer setup
 RUN composer install --no-dev --optimize-autoloader
 
-# Set write permissions for Laravel storage and bootstrap cache
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+# Set write permissions for Laravel storage, bootstrap cache, and SQLite database
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache /var/www/html/database
 
 # Expose default HTTP port
 EXPOSE 80
