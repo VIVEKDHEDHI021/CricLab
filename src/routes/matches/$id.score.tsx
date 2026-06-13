@@ -208,6 +208,7 @@ function LiveScoring() {
   const [undoneBallIds, setUndoneBallIds] = useState<string[]>([]);
   const [activeExtraKind, setActiveExtraKind] = useState<"wide" | "no_ball" | "bye" | "leg_bye" | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [bypassSyncLock, setBypassSyncLock] = useState(false);
   const [hasUnsyncedEvents, setHasUnsyncedEvents] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [actionLock, setActionLock] = useState(false);
@@ -861,8 +862,11 @@ function LiveScoring() {
   const loadLocalData = async () => {
     const dbEvents = await indexedDbService.getBallEvents(id);
     setLocalEvents(dbEvents);
-    const queue = await indexedDbService.getSyncQueue(id);
-    setHasUnsyncedEvents(queue.some((q) => q.status === 'pending'));
+    const hasPending = dbEvents.some((e) => e.metadata?.synced === false);
+    setHasUnsyncedEvents(hasPending);
+    if (!hasPending) {
+      setBypassSyncLock(false);
+    }
 
     try {
       const serverLogs = await matchService.getAuditLogs(id);
@@ -885,32 +889,32 @@ function LiveScoring() {
   }, []);
 
   // 4. Events Log-Based Background Sync Engine
-  const syncPendingEvents = async () => {
+  const syncUnsyncedEvents = async () => {
     if (syncing) return;
     setSyncing(true);
     setSyncError(null);
     try {
-      const queue = await indexedDbService.getSyncQueue(id);
-      const pending = queue.filter(q => q.status === 'pending');
+      const local = await indexedDbService.getBallEvents(id);
+      const unsynced = local.filter((e) => e.metadata?.synced === false);
 
-      if (pending.length > 0) {
-        await logAudit('sync_attempt', `Attempting to sync ${pending.length} pending scoring event(s) to backend.`);
+      if (unsynced.length > 0) {
+        await logAudit('sync_attempt', `Attempting to sync ${unsynced.length} pending scoring event(s) to backend.`);
 
-        const eventsToSync = pending.map(p => p.payload);
         try {
-          await ballService.syncEvents(id, eventsToSync);
-          for (const item of pending) {
-            await indexedDbService.removeFromSyncQueue(item.id);
+          await ballService.syncEvents(id, unsynced);
+          for (const event of unsynced) {
+            const updatedEvent = {
+              ...event,
+              metadata: {
+                ...event.metadata,
+                synced: true
+              }
+            };
+            await indexedDbService.saveBallEvent(updatedEvent);
           }
         } catch (err: any) {
           console.error("Batch sync failed", err);
           await logAudit('sync_failure', `Sync failed: ${err.message || "Network error"}`);
-          for (const item of pending) {
-            item.attempts++;
-            item.status = item.attempts >= 5 ? 'failed' : 'pending';
-            item.last_error = err.message || "Network error";
-            await indexedDbService.addToSyncQueue(item);
-          }
           throw err;
         }
       }
@@ -929,8 +933,12 @@ function LiveScoring() {
       }
 
       await reload();
-      const updatedQueue = await indexedDbService.getSyncQueue(id);
-      setHasUnsyncedEvents(updatedQueue.some((q) => q.status === 'pending'));
+      const updatedLocal = await indexedDbService.getBallEvents(id);
+      const hasPending = updatedLocal.some((e) => e.metadata?.synced === false);
+      setHasUnsyncedEvents(hasPending);
+      if (!hasPending) {
+        setBypassSyncLock(false);
+      }
 
       // Reload merged audit logs
       try {
@@ -957,14 +965,18 @@ function LiveScoring() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      syncPendingEvents();
-    }, 5000);
+      syncUnsyncedEvents();
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [id, currentInn?.id]);
 
   const handleSaveEdit = async () => {
     if (!editingBall) return;
+    if (hasUnsyncedEvents && !bypassSyncLock) {
+      toast.error("Waiting for previous ball to sync...");
+      return;
+    }
     setIsSavingEdit(true);
 
     const isWicket = editIsWicket;
@@ -999,21 +1011,14 @@ function LiveScoring() {
         wicket_type: isWicket ? editWicketType : null,
         dismissed_player_id: isWicket ? editBatterId : null,
         legal_delivery: isLegal,
-        caught_by_id: (isWicket && editWicketType === "caught") ? editCaughtById || null : null
+        caught_by_id: (isWicket && editWicketType === "caught") ? editCaughtById || null : null,
+        synced: false
       }
     };
 
     try {
       setIsEditBallOpen(false);
       await indexedDbService.saveBallEvent(corrEvent);
-      await indexedDbService.addToSyncQueue({
-        id: corrUuid,
-        event_uuid: corrUuid,
-        match_id: id,
-        status: 'pending',
-        attempts: 0,
-        payload: corrEvent
-      });
       const batterName = playerName(editBatterId) || 'Unknown';
       const bowlerName = playerName(editBowlerId) || 'Unknown';
       await logAudit(
@@ -1026,7 +1031,11 @@ function LiveScoring() {
       toast.success("Ball updated successfully");
       const updated = await indexedDbService.getBallEvents(id);
       setLocalEvents(updated);
-      syncPendingEvents();
+      try {
+        await syncUnsyncedEvents();
+      } catch (err) {
+        console.warn("Correction sync failed, saved offline");
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || "Failed to update ball");
     } finally {
@@ -1036,6 +1045,10 @@ function LiveScoring() {
 
   const handleDeleteBall = async () => {
     if (!editingBall) return;
+    if (hasUnsyncedEvents && !bypassSyncLock) {
+      toast.error("Waiting for previous ball to sync...");
+      return;
+    }
     if (!confirm("Are you sure you want to delete this ball? This will recalculate the entire innings.")) return;
 
     setIsSavingEdit(true);
@@ -1054,25 +1067,22 @@ function LiveScoring() {
       scorer_id: user?.id || null,
       device_timestamp: Date.now(),
       metadata: {
-        target_event_uuid: editingBall.id
+        target_event_uuid: editingBall.id,
+        synced: false
       }
     };
 
     try {
       setIsEditBallOpen(false);
       await indexedDbService.saveBallEvent(undoEvent);
-      await indexedDbService.addToSyncQueue({
-        id: undoUuid,
-        event_uuid: undoUuid,
-        match_id: id,
-        status: 'pending',
-        attempts: 0,
-        payload: undoEvent
-      });
       toast.success("Ball deleted successfully");
       const updated = await indexedDbService.getBallEvents(id);
       setLocalEvents(updated);
-      syncPendingEvents();
+      try {
+        await syncUnsyncedEvents();
+      } catch (err) {
+        console.warn("Delete ball sync failed, saved offline");
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || "Failed to delete ball");
     } finally {
@@ -1541,6 +1551,11 @@ function LiveScoring() {
     // Close current innings if it's open
     if (currentInn && !currentInn.is_closed) {
       try {
+        try {
+          await syncUnsyncedEvents();
+        } catch (syncErr) {
+          console.warn("Failed to sync final events before closing innings", syncErr);
+        }
         await inningsService.closeInnings(currentInn.id);
       } catch (e) {
         console.warn("Failed to close innings on server in startInnings, falling back offline:", e);
@@ -1719,6 +1734,11 @@ function LiveScoring() {
       const timer = setTimeout(async () => {
         try {
           if (currentInn) {
+            try {
+              await syncUnsyncedEvents();
+            } catch (syncErr) {
+              console.warn("Failed to sync final events before closing innings", syncErr);
+            }
             await inningsService.closeInnings(currentInn.id);
             toast.success("First innings completed!");
             reload();
@@ -1764,20 +1784,13 @@ function LiveScoring() {
       scorer_id: user?.id || null,
       device_timestamp: Date.now(),
       metadata: {
-        result: resultStr
+        result: resultStr,
+        synced: false
       }
     };
 
     try {
       await indexedDbService.saveBallEvent(matchEndedEvent);
-      await indexedDbService.addToSyncQueue({
-        id: endUuid,
-        event_uuid: endUuid,
-        match_id: id,
-        status: 'pending',
-        attempts: 0,
-        payload: matchEndedEvent
-      });
       const updated = await indexedDbService.getBallEvents(id);
       setLocalEvents(updated);
     } catch (err) {
@@ -1786,7 +1799,7 @@ function LiveScoring() {
 
     // 2. Sync events to update the server and refresh query cache
     try {
-      await syncPendingEvents();
+      await syncUnsyncedEvents();
       toast.success("Match completed and synced successfully!");
       queryClient.invalidateQueries({ queryKey: ["match", id] });
       queryClient.invalidateQueries({ queryKey: ["matches"] });
@@ -1870,6 +1883,11 @@ function LiveScoring() {
     if (!currentInn) return;
     if (!confirm("Are you sure you want to end this innings manually?")) return;
     try {
+      try {
+        await syncUnsyncedEvents();
+      } catch (syncErr) {
+        console.warn("Failed to sync final events before closing innings", syncErr);
+      }
       await inningsService.closeInnings(currentInn.id);
       toast.success("Innings manually closed");
       setIsMoreOptionsOpen(false);
@@ -1936,6 +1954,10 @@ function LiveScoring() {
 
   const executeWicketBall = async (wType: string, dismissedId: string, caughtByPlayerId?: string) => {
     if (actionLock || cooldownRemaining > 0) return;
+    if (hasUnsyncedEvents && !bypassSyncLock) {
+      toast.error("Waiting for previous ball to sync...");
+      return;
+    }
     setIsWicketDialogOpen(false);
     if (!currentInn) return toast.error("Start an innings first");
 
@@ -2004,7 +2026,8 @@ function LiveScoring() {
       scorer_id: user?.id || null,
       device_timestamp: now,
       metadata: {
-        caught_by_id: wType === "caught" ? caughtByPlayerId || null : null
+        caught_by_id: wType === "caught" ? caughtByPlayerId || null : null,
+        synced: false
       }
     };
 
@@ -2070,14 +2093,6 @@ function LiveScoring() {
     // Save event locally
     (async () => {
       await indexedDbService.saveBallEvent(newEvent);
-      await indexedDbService.addToSyncQueue({
-        id: eventUuid,
-        event_uuid: eventUuid,
-        match_id: id,
-        status: 'pending',
-        attempts: 0,
-        payload: newEvent
-      });
       const dismissedName = playerName(dismissedId) || 'Unknown';
       const bowlerName = playerName(bowler) || 'Unknown';
       await logAudit(
@@ -2087,8 +2102,12 @@ function LiveScoring() {
         null,
         newEvent
       );
-      loadLocalData();
-      syncPendingEvents();
+      await loadLocalData();
+      try {
+        await syncUnsyncedEvents();
+      } catch (err) {
+        console.warn("Wicket sync failed, saved offline");
+      }
     })();
 
     setShowUndoBanner(true);
@@ -2100,6 +2119,10 @@ function LiveScoring() {
     runs = 0,
   ) => {
     if (actionLock || cooldownRemaining > 0) return;
+    if (hasUnsyncedEvents && !bypassSyncLock) {
+      toast.error("Waiting for previous ball to sync...");
+      return;
+    }
     if (kind === "wicket") {
       handleWicketClick();
       return;
@@ -2192,7 +2215,8 @@ function LiveScoring() {
       scorer_id: user?.id || null,
       device_timestamp: now,
       metadata: {
-        caught_by_id: null
+        caught_by_id: null,
+        synced: false
       }
     };
 
@@ -2312,14 +2336,6 @@ function LiveScoring() {
     // Save event locally
     (async () => {
       await indexedDbService.saveBallEvent(newEvent);
-      await indexedDbService.addToSyncQueue({
-        id: eventUuid,
-        event_uuid: eventUuid,
-        match_id: id,
-        status: 'pending',
-        attempts: 0,
-        payload: newEvent
-      });
       const strikerName = playerName(striker) || 'Unknown';
       const bowlerName = playerName(bowler) || 'Unknown';
       await logAudit(
@@ -2329,8 +2345,12 @@ function LiveScoring() {
         null,
         newEvent
       );
-      loadLocalData();
-      syncPendingEvents();
+      await loadLocalData();
+      try {
+        await syncUnsyncedEvents();
+      } catch (err) {
+        console.warn("Ball sync failed, saved offline");
+      }
     })();
     setUnlocked(false);
     setShowUndoBanner(true);
@@ -2340,6 +2360,10 @@ function LiveScoring() {
   const undo = async () => {
     if (!currentInn) return;
     if (actionLock) return;
+    if (hasUnsyncedEvents && !bypassSyncLock) {
+      toast.error("Waiting for previous ball to sync...");
+      return;
+    }
 
     // Cooldown check
     const now = Date.now();
@@ -2418,20 +2442,13 @@ function LiveScoring() {
       scorer_id: user?.id || null,
       device_timestamp: now,
       metadata: {
-        target_event_uuid: lastEffectiveBallEvent.event_uuid
+        target_event_uuid: lastEffectiveBallEvent.event_uuid,
+        synced: false
       }
     };
 
     try {
       await indexedDbService.saveBallEvent(undoEvent);
-      await indexedDbService.addToSyncQueue({
-        id: undoUuid,
-        event_uuid: undoUuid,
-        match_id: id,
-        status: 'pending',
-        attempts: 0,
-        payload: undoEvent
-      });
       await logAudit(
         'undo',
         `Undid ball event: ${lastEffectiveBallEvent.event_uuid}`,
@@ -2442,7 +2459,11 @@ function LiveScoring() {
       setLastUndoTime(now);
       const updated = await indexedDbService.getBallEvents(id);
       setLocalEvents(updated);
-      syncPendingEvents();
+      try {
+        await syncUnsyncedEvents();
+      } catch (err) {
+        console.warn("Undo sync failed, saved offline");
+      }
       toast.success("Last ball undone");
     } catch (err: any) {
       console.error("Failed to undo ball locally", err);
@@ -2766,7 +2787,7 @@ function LiveScoring() {
 
   // Innings / Match Completed wrapper (retaining dark/original colors)
   if (!currentInn || currentInn.is_closed) {
-    const nextInnNo = (innings[innings.length - 1]?.innings_no ?? 0) + 1;
+    const nextInnNo = (optimisticInnings[optimisticInnings.length - 1]?.innings_no ?? 0) + 1;
     if (nextInnNo > 2) {
       return (
         <AppShell>
@@ -2807,9 +2828,9 @@ function LiveScoring() {
       );
     }
 
-    if (innings.length === 1) {
+    if (optimisticInnings.length === 1) {
       const opponentTeamId =
-        innings[0].batting_team_id === match.team_a_id
+        optimisticInnings[0].batting_team_id === match.team_a_id
           ? match.team_b_id
           : match.team_a_id;
       return (
@@ -2822,11 +2843,11 @@ function LiveScoring() {
                   Innings 1 Complete
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  {teamName(innings[0].batting_team_id)} finished their innings with{" "}
+                  {teamName(optimisticInnings[0].batting_team_id)} finished their innings with{" "}
                   <span className="font-bold text-foreground">
-                    {innings[0].runs}/{innings[0].wickets}
+                    {optimisticInnings[0].runs}/{optimisticInnings[0].wickets}
                   </span>{" "}
-                  in {oversText(innings[0].legal_balls)} overs.
+                  in {oversText(optimisticInnings[0].legal_balls)} overs.
                 </p>
                 {canScore ? (
                   <Button
@@ -3269,7 +3290,7 @@ function LiveScoring() {
 
             {/* Scoring Panel Buttons (Interactive modifier layout - no modals, fast taps) */}
             {canScore && (
-              <div className="space-y-3">
+              <div className="space-y-3 relative overflow-hidden rounded-2xl">
                 {/* Cooldown / Ready Status Banner */}
                 {cooldownRemaining > 0 ? (
                   <div className="bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-xl py-2.5 px-3 flex items-center justify-between text-xs font-semibold select-none">
@@ -3291,7 +3312,7 @@ function LiveScoring() {
                   </div>
                 )}
 
-                <div className={`space-y-3 transition-all duration-200 ${actionLock || cooldownRemaining > 0 ? "pointer-events-none opacity-50" : ""}`}>
+                <div className={`space-y-3 transition-all duration-200 ${(actionLock || cooldownRemaining > 0 || (hasUnsyncedEvents && !bypassSyncLock)) ? "pointer-events-none opacity-50" : ""}`}>
                 {/* Modifier Helper Banner */}
                 {activeExtraKind && (
                   <div className="bg-primary/10 border border-primary/20 text-primary rounded-xl py-2 px-3 flex items-center justify-between text-xs animate-pulse">
@@ -3543,6 +3564,51 @@ function LiveScoring() {
                   </Button>
                 </div>
               </div>
+
+              {hasUnsyncedEvents && !bypassSyncLock && (
+                <div className="absolute inset-0 bg-background/80 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200 border border-border/40 rounded-2xl shadow-2xl">
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-sky-500/20 rounded-full blur-xl animate-pulse" />
+                    <div className="relative bg-gradient-to-tr from-sky-600 to-indigo-600 p-4 rounded-full shadow-lg shadow-sky-500/30 border border-sky-400/30">
+                      <Cloud className="h-8 w-8 text-white animate-bounce" />
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2 max-w-xs">
+                    <h4 className="font-black text-lg text-foreground tracking-tight">Syncing Live Score...</h4>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      We are securing your last scoring event to the server. Please wait a moment.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-2 w-full max-w-[240px] pt-2">
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic();
+                        syncUnsyncedEvents();
+                      }}
+                      className="w-full bg-gradient-to-r from-sky-500 to-indigo-500 hover:from-sky-600 hover:to-indigo-600 text-white font-black text-xs py-2 h-10 rounded-xl shadow-md shadow-sky-500/10 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer border-none"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+                      {syncing ? "Syncing..." : "Retry Sync"}
+                    </Button>
+                    
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic();
+                        setBypassSyncLock(true);
+                        toast.info("Scoring in offline bypass mode. Unsynced balls will sync automatically when connection restores.");
+                      }}
+                      variant="ghost"
+                      className="w-full bg-card hover:bg-muted text-muted-foreground hover:text-foreground font-extrabold text-xs py-2 h-10 rounded-xl border border-border/50 active:scale-95 transition-all cursor-pointer"
+                    >
+                      Score Offline
+                    </Button>
+                  </div>
+                </div>
+              )}
               </div>
             )}
 
