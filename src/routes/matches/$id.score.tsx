@@ -3580,12 +3580,8 @@ function LiveScoring() {
               </div>
             )}
           </Card>
-        </div>
-        </div>
-
-        {/* Below-fold: Scorer Controls / Dropdowns — hidden in single-frame, accessible by scroll */}
-        <div className="hidden">
-        <div className="max-w-xl mx-auto px-3">
+        
+        {/* Below-fold: Scorer Controls / Dropdowns — accessible by scroll */}
           {/* Scorer Controls / Dropdowns (preserving theme card classes) */}
           {canScore ? (
             <Card className="p-4 rounded-2xl border border-border/40 shadow-md space-y-3.5 relative overflow-hidden">
@@ -4709,129 +4705,6 @@ function LiveScoring() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Audit Trail Card ─────────────────────────────── */}
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50, padding: '0 0 0 0' }}>
-        <div
-          id="audit-trail-section"
-          style={{
-            maxWidth: 640,
-            margin: '0 auto',
-            background: 'var(--card)',
-            border: '1px solid var(--border)',
-            borderRadius: showAuditTrail ? '16px 16px 0 0' : '16px 16px 0 0',
-            boxShadow: '0 -4px 24px rgba(0,0,0,0.18)',
-            overflow: 'hidden',
-          }}
-        >
-          {/* Header toggle */}
-          <button
-            onClick={() => setShowAuditTrail(v => !v)}
-            style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '10px 16px',
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--foreground)',
-            }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 13 }}>
-              <History size={15} style={{ color: 'var(--primary)' }} />
-              Match Audit Trail
-              {auditLogs.length > 0 && (
-                <span style={{
-                  background: 'var(--primary)',
-                  color: 'var(--primary-foreground)',
-                  borderRadius: 999,
-                  padding: '1px 7px',
-                  fontSize: 10,
-                  fontWeight: 700,
-                }}>
-                  {auditLogs.length}
-                </span>
-              )}
-            </span>
-            {showAuditTrail ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
-          </button>
-
-          {/* Expandable log list */}
-          {showAuditTrail && (
-            <div style={{ maxHeight: 320, overflowY: 'auto', padding: '0 12px 12px' }}>
-              {auditLogs.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--muted-foreground)', fontSize: 12 }}>
-                  No audit events recorded yet. Start scoring to see the trail.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {auditLogs.slice(0, 50).map((log) => {
-                    const badgeConfig: Record<string, { bg: string; label: string }> = {
-                      score:         { bg: '#16a34a', label: 'SCORE' },
-                      correct:       { bg: '#d97706', label: 'CORRECT' },
-                      undo:          { bg: '#7c3aed', label: 'UNDO' },
-                      sync_attempt:  { bg: '#0284c7', label: 'SYNC' },
-                      sync_failure:  { bg: '#dc2626', label: 'FAIL' },
-                    };
-                    const cfg = badgeConfig[log.action_type] || { bg: '#6b7280', label: (log.action_type || 'LOG').toUpperCase() };
-                    const ts = new Date(log.device_timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                    return (
-                      <div
-                        key={log.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: 8,
-                          padding: '7px 10px',
-                          background: 'var(--muted)',
-                          borderRadius: 10,
-                          fontSize: 11,
-                        }}
-                      >
-                        {/* Action badge */}
-                        <span style={{
-                          background: cfg.bg,
-                          color: '#fff',
-                          borderRadius: 5,
-                          padding: '2px 7px',
-                          fontWeight: 800,
-                          fontSize: 9,
-                          letterSpacing: 0.5,
-                          flexShrink: 0,
-                          marginTop: 1,
-                        }}>
-                          {cfg.label}
-                        </span>
-
-                        {/* Description */}
-                        <span style={{ flex: 1, color: 'var(--foreground)', lineHeight: '1.4' }}>
-                          {log.description}
-                        </span>
-
-                        {/* Right-side meta */}
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
-                          <span style={{ color: 'var(--muted-foreground)', fontSize: 9 }}>{ts}</span>
-                          <span style={{
-                            background: log.synced ? '#bbf7d0' : '#fde68a',
-                            color: log.synced ? '#15803d' : '#92400e',
-                            borderRadius: 4,
-                            padding: '1px 5px',
-                            fontSize: 8,
-                            fontWeight: 700,
-                          }}>
-                            {log.synced ? 'Synced' : 'Pending'}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
     </AppShell>
   );
 }

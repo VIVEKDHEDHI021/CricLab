@@ -482,6 +482,7 @@ export const matchEngine = {
       bowler.maidens = maidens;
     });
 
+    state.current_innings = currentInningsNo;
     return state;
   },
 

@@ -33,7 +33,8 @@ function MatchDetails() {
     queryFn: () => matchService.getMatch(id),
     refetchInterval: (query) => {
       const matchData = query.state.data as any;
-      return matchData?.m?.status === 'live' ? 5000 : false;
+      const status = matchData?.m?.status;
+      return status === 'live' || status === 'upcoming' ? 3000 : false;
     }
   });
 
