@@ -8,6 +8,7 @@ use App\Http\Controllers\MatchController;
 use App\Http\Controllers\PlayerController;
 use App\Http\Controllers\TeamController;
 use App\Http\Controllers\BackupController;
+use App\Http\Controllers\MigrationController;
 use App\Services\AdminAccountService;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Broadcast;
@@ -41,6 +42,7 @@ Route::middleware(['auth:sanctum', 'force_password_change'])->group(function () 
 
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
+    Route::get('/migration/data', [MigrationController::class, 'exportMigrationData']);
     Route::post('/change-password', [AuthController::class, 'changePassword']);
 
     // General reads and writes

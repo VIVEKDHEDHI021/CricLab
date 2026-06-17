@@ -42,6 +42,11 @@ function LoginPage() {
   const [forgotBusy, setForgotBusy] = useState(false);
   const [forgotMessage, setForgotMessage] = useState("");
 
+  // Database sync states
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [syncStatus, setSyncStatus] = useState("");
+
   useEffect(() => {
     if (!loading && user && currentRole) {
       nav({ to: "/dashboard" });
@@ -90,8 +95,19 @@ function LoginPage() {
     }
 
     setBusy(true);
+    setSyncProgress(0);
+    setSyncStatus("Checking credentials...");
     try {
-      const { token, user: loggedUser } = await authService.login(mobile, password, role ?? "user");
+      const { token, user: loggedUser } = await authService.login(
+        mobile,
+        password,
+        role ?? "user",
+        (progress, status) => {
+          setSyncing(true);
+          setSyncProgress(progress);
+          setSyncStatus(status);
+        }
+      );
       
       setToken(token);
       updateEchoAuth();
@@ -119,6 +135,7 @@ function LoginPage() {
       toast.error(message);
     } finally {
       setBusy(false);
+      setSyncing(false);
     }
   };
 
@@ -305,6 +322,47 @@ function LoginPage() {
               </Button>
             </form>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Synchronization Progress Dialog */}
+      <Dialog open={syncing} onOpenChange={() => {}}>
+        <DialogContent className="sm:max-w-md bg-slate-900 border-slate-800 text-slate-100 rounded-3xl p-8 outline-none [&>button]:hidden">
+          <DialogHeader className="text-center space-y-3">
+            <DialogTitle className="text-2xl font-bold tracking-tight bg-gradient-to-r from-primary to-orange-400 bg-clip-text text-transparent flex items-center justify-center gap-2">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              Syncing Web Database
+            </DialogTitle>
+            <p className="text-xs text-slate-400 max-w-xs mx-auto">
+              We are preparing your offline scoring room by fetching matches, teams, and player profiles.
+            </p>
+          </DialogHeader>
+          <div className="space-y-4 py-4 text-center">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-200">{syncStatus}</p>
+              <p className="text-[10px] text-slate-500">Please do not minimize or close the application</p>
+            </div>
+            <div className="relative pt-1">
+              <div className="flex mb-2 items-center justify-between">
+                <div>
+                  <span className="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-slate-950 bg-primary">
+                    Progress
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-xs font-semibold inline-block text-primary">
+                    {syncProgress}%
+                  </span>
+                </div>
+              </div>
+              <div className="overflow-hidden h-2 text-xs flex rounded-full bg-slate-950 border border-slate-800">
+                <div
+                  style={{ width: `${syncProgress}%` }}
+                  className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-gradient-to-r from-primary to-orange-500 transition-all duration-300 ease-out"
+                ></div>
+              </div>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
