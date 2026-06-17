@@ -44,7 +44,40 @@ class MigrationController extends Controller
             $matches = CricketMatch::all();
             $matchSquads = MatchSquad::all();
             $innings = Innings::all();
+            
+            // Map balls to ballEvents if ballEvents is empty
             $ballEvents = BallEvent::all();
+            if ($ballEvents->isEmpty()) {
+                $inningsData = Innings::all()->keyBy('id')->toArray();
+                $ballEvents = \App\Models\Ball::all()->map(function ($ball) use ($inningsData) {
+                    $inn = $inningsData[$ball->innings_id] ?? null;
+                    return [
+                        'event_uuid' => $ball->id,
+                        'event_type' => 'BALL_EVENT',
+                        'sequence_number' => (int)$ball->ball_index,
+                        'match_id' => $ball->match_id,
+                        'innings_no' => $inn ? (int)$inn['innings_no'] : 1,
+                        'over_no' => (int)$ball->over_number,
+                        'ball_no' => (int)$ball->ball_in_over,
+                        'striker_id' => $ball->batter_id,
+                        'non_striker_id' => $ball->non_striker_id,
+                        'bowler_id' => $ball->bowler_id,
+                        'batting_team_id' => $inn ? $inn['batting_team_id'] : null,
+                        'bowling_team_id' => $inn ? $inn['bowling_team_id'] : null,
+                        'runs_off_bat' => (int)$ball->runs,
+                        'extras' => (int)$ball->extra_runs,
+                        'extra_type' => $ball->extra_type,
+                        'wicket' => $ball->is_wicket ? 1 : 0,
+                        'wicket_type' => $ball->wicket_type,
+                        'dismissed_player_id' => $ball->is_wicket ? $ball->batter_id : null,
+                        'legal_delivery' => $ball->is_legal ? 1 : 0,
+                        'scorer_id' => null,
+                        'device_timestamp' => $ball->created_at ? strtotime($ball->created_at) * 1000 : time() * 1000,
+                        'metadata' => $ball->caught_by_id ? ['caught_by_id' => $ball->caught_by_id] : null,
+                    ];
+                });
+            }
+
             $appSettings = []; // Empty or default settings
 
             // Build migration JSON
@@ -133,7 +166,40 @@ class MigrationController extends Controller
             $matches = CricketMatch::all();
             $matchSquads = MatchSquad::all();
             $innings = Innings::all();
+            
+            // Map balls to ballEvents if ballEvents is empty
             $ballEvents = BallEvent::all();
+            if ($ballEvents->isEmpty()) {
+                $inningsData = Innings::all()->keyBy('id')->toArray();
+                $ballEvents = \App\Models\Ball::all()->map(function ($ball) use ($inningsData) {
+                    $inn = $inningsData[$ball->innings_id] ?? null;
+                    return [
+                        'event_uuid' => $ball->id,
+                        'event_type' => 'BALL_EVENT',
+                        'sequence_number' => (int)$ball->ball_index,
+                        'match_id' => $ball->match_id,
+                        'innings_no' => $inn ? (int)$inn['innings_no'] : 1,
+                        'over_no' => (int)$ball->over_number,
+                        'ball_no' => (int)$ball->ball_in_over,
+                        'striker_id' => $ball->batter_id,
+                        'non_striker_id' => $ball->non_striker_id,
+                        'bowler_id' => $ball->bowler_id,
+                        'batting_team_id' => $inn ? $inn['batting_team_id'] : null,
+                        'bowling_team_id' => $inn ? $inn['bowling_team_id'] : null,
+                        'runs_off_bat' => (int)$ball->runs,
+                        'extras' => (int)$ball->extra_runs,
+                        'extra_type' => $ball->extra_type,
+                        'wicket' => $ball->is_wicket ? 1 : 0,
+                        'wicket_type' => $ball->wicket_type,
+                        'dismissed_player_id' => $ball->is_wicket ? $ball->batter_id : null,
+                        'legal_delivery' => $ball->is_legal ? 1 : 0,
+                        'scorer_id' => null,
+                        'device_timestamp' => $ball->created_at ? strtotime($ball->created_at) * 1000 : time() * 1000,
+                        'metadata' => $ball->caught_by_id ? ['caught_by_id' => $ball->caught_by_id] : null,
+                    ];
+                });
+            }
+
             $appSettings = [];
 
             return response()->json([
