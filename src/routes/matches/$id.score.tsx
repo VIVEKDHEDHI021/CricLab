@@ -1387,32 +1387,41 @@ function LiveScoring() {
       });
 
       toast.success("Match completed successfully!");
+
+      // Auto-upload completed match scorecard to the server
+      const uploadToastId = toast.loading("Uploading match scorecard to cloud server...");
+      try {
+        await matchService.uploadMatchToServer(id);
+        toast.success("Match scorecard successfully synced to server!", { id: uploadToastId });
+        
+        // Register local backup registry as exported
+        try {
+          const backupData = await backupService.exportSingleMatchBackup(id);
+          backupService.saveLocalBackup(id, backupData);
+        } catch (regErr) {
+          console.warn("Failed to register local backup details:", regErr);
+        }
+      } catch (uploadErr: any) {
+        console.warn("Automatic match upload failed:", uploadErr);
+        toast.error("Could not upload to server (offline/server unreachable). You can manually sync later from the Backup Center.", { id: uploadToastId, duration: 6000 });
+        
+        // Mark local backup as pending for manual sync later
+        backupService.markBackupPending(id, {
+          date: dateStr,
+          teams: teamsStr,
+          result: resultStr,
+          version: 1
+        });
+      }
+
       await reload();
+      nav({ to: "/matches/$id", params: { id } });
     } catch (err: any) {
       console.error("Failed to complete match:", err);
       toast.error(err.message || "Failed to complete match");
     }
 
-    // Cache the completed match details locally before exporting
-    const detail = {
-      m: { ...match, status: 'past', is_closed: true, result: resultStr },
-      teams,
-      innings: optimisticInnings,
-      players,
-      balls: combinedBalls
-    };
-    localStorage.setItem(`criclab_match_cache_${id}`, JSON.stringify(detail));
-
-    // Open backup prompt
-    setBackupDialogMetadata({
-      winnerTeamName: winnerCelebration?.winnerTeamName || "Winner",
-      margin: winnerCelebration?.margin || "Match Finished",
-      date: dateStr,
-      teams: teamsStr,
-      result: resultStr,
-    });
     setWinnerCelebration(null);
-    setShowBackupDialog(true);
   };
 
   const handleSaveBackup = async () => {

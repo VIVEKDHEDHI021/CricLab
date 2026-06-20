@@ -21,7 +21,8 @@ import {
   Lock,
   Plus,
   DatabaseZap,
-  HardDrive
+  HardDrive,
+  Cloud
 } from "lucide-react";
 import { backupService, type BackupRegistryEntry } from "@/lib/services/backupService";
 import { matchService } from "@/lib/services/matchService";
@@ -49,6 +50,31 @@ function BackupCenter() {
   const [showImportConfirmDialog, setShowImportConfirmDialog] = useState(false);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [importPreview, setImportPreview] = useState<{ matchCount: number; teamCount: number; playerCount: number; dateString: string } | null>(null);
+
+  const [uploadingMatchId, setUploadingMatchId] = useState<string | null>(null);
+
+  const handleUploadToServer = async (matchId: string) => {
+    setUploadingMatchId(matchId);
+    const toastId = toast.loading("Syncing match scorecard to server...");
+    try {
+      await matchService.uploadMatchToServer(matchId);
+      toast.success("Match scorecard successfully synced to server!", { id: toastId });
+      
+      // Update local backup status registry as exported
+      try {
+        const backupData = await backupService.exportSingleMatchBackup(matchId);
+        backupService.saveLocalBackup(matchId, backupData);
+      } catch (regErr) {
+        console.warn("Failed to update registry status:", regErr);
+      }
+      
+      loadData();
+    } catch (e: any) {
+      toast.error("Failed to sync match to server: " + e.message, { id: toastId });
+    } finally {
+      setUploadingMatchId(null);
+    }
+  };
 
   const handleClearAllData = async () => {
     if (clearConfirmText !== 'RESET') {
@@ -781,13 +807,23 @@ function BackupCenter() {
                     </div>
 
                     {/* Action grid for single match backup */}
-                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 border-t border-border/40 pt-3 text-center">
+                    <div className="grid grid-cols-3 sm:grid-cols-7 gap-2 border-t border-border/40 pt-3 text-center">
                       <Link to="/matches/$id" params={{ id: m.id }} className="block">
                         <Button variant="outline" className="w-full text-[10px] font-bold h-9 px-1 rounded-xl gap-1">
                           <FileText className="h-3.5 w-3.5 shrink-0" />
                           <span>Scorecard</span>
                         </Button>
                       </Link>
+
+                      <Button 
+                        variant="outline" 
+                        onClick={() => handleUploadToServer(m.id)}
+                        disabled={uploadingMatchId !== null}
+                        className="text-[10px] font-bold h-9 px-1 rounded-xl gap-1"
+                      >
+                        <Cloud className={`h-3.5 w-3.5 shrink-0 text-amber-500 ${uploadingMatchId === m.id ? "animate-spin" : ""}`} />
+                        <span>Sync Cloud</span>
+                      </Button>
 
                       <Button 
                         variant="outline" 

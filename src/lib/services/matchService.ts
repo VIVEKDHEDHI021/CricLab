@@ -2,6 +2,7 @@ import { sqliteService } from './sqliteService';
 import { v4 as uuidv4 } from 'uuid';
 import type { MatchSummary } from '@/components/MatchCard';
 import { buildLocalMatchSummary } from './matchSummaryService';
+import api from '../api';
 
 export type MatchDetail = {
   m: any;
@@ -549,5 +550,41 @@ export const matchService = {
         [matchId, playerId]
       );
     });
+  },
+
+  async uploadMatchToServer(matchId: string): Promise<void> {
+    try {
+      const detail = await this.getMatch(matchId);
+      if (!detail || !detail.m) {
+        throw new Error("Match details not found in local SQLite database.");
+      }
+
+      // Convert V2 database fields into standard backup structure
+      const backupData = {
+        teams: detail.teams || [],
+        players: detail.players || [],
+        matches: [detail.m],
+        innings: detail.innings || [],
+        balls: detail.balls || []
+      };
+
+      const jsonStr = JSON.stringify(backupData);
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const formData = new FormData();
+      formData.append("backup_file", blob, `match_upload_${matchId}.json`);
+
+      const response = await api.post("/backup/import", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      if (response.data?.status !== "success") {
+        throw new Error(response.data?.message || "Server did not return success status.");
+      }
+    } catch (err: any) {
+      console.error("[MatchService] Failed to upload match to server:", err);
+      throw new Error(err.response?.data?.message || err.message || "Failed to upload match to server.");
+    }
   }
 };
