@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
@@ -5,16 +6,19 @@ import { MatchCard } from "@/components/MatchCard";
 import { fetchMatchSummaries } from "@/lib/match";
 import { useAuth } from "@/hooks/useAuth";
 import { matchService } from "@/lib/services/matchService";
+import { migrationImportService } from "@/lib/services/migrationImportService";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { PlusCircle } from "lucide-react";
+import { PlusCircle, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/matches/")({ component: MatchesList });
 
 function MatchesList() {
   const { role } = useAuth();
   const qc = useQueryClient();
+  const [isSyncing, setIsSyncing] = useState(false);
+
   const { data, isLoading } = useQuery({
     queryKey: ["matches"],
     queryFn: fetchMatchSummaries,
@@ -25,6 +29,24 @@ function MatchesList() {
       return matches?.some((m: any) => m.status === 'live') ? 5000 : false;
     }
   });
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    const toastId = toast.loading("Syncing matches and players from cloud server...");
+    try {
+      await migrationImportService.importFromApi((progress, status) => {
+        toast.loading(`Syncing: ${status} (${progress}%)`, { id: toastId });
+      });
+      toast.success("Database synchronized successfully!", { id: toastId });
+      qc.invalidateQueries({ queryKey: ["matches"] });
+      qc.invalidateQueries({ queryKey: ["playerRankings"] });
+      qc.invalidateQueries({ queryKey: ["manOfTheDay"] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to synchronize database.", { id: toastId });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Scorers and admins can manage matches
   const canManage = role === "admin" || role === "scorer";
@@ -43,8 +65,17 @@ function MatchesList() {
   return (
     <AppShell title="Matches">
       <div className="flex gap-2 mb-4">
-        <Link to="/teams" className="flex-1"><Button variant="secondary" className="w-full">Teams</Button></Link>
-        <Link to="/players" className="flex-1"><Button variant="secondary" className="w-full">Players</Button></Link>
+        <Link to="/teams" className="flex-1"><Button variant="secondary" className="w-full text-xs">Teams</Button></Link>
+        <Link to="/players" className="flex-1"><Button variant="secondary" className="w-full text-xs">Players</Button></Link>
+        <Button 
+          variant="outline" 
+          className="flex-1 gap-1 text-xs" 
+          onClick={handleSync} 
+          disabled={isSyncing}
+        >
+          <RefreshCw className={`h-3 w-3 ${isSyncing ? "animate-spin" : ""}`} />
+          {isSyncing ? "Syncing..." : "Sync Cloud"}
+        </Button>
       </div>
       {canManage && (
         <Link to="/matches/new" className="block mb-4">
