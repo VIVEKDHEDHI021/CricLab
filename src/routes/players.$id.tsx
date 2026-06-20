@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { playerService, type PlayerProfile, type Player } from "@/lib/services/playerService";
 import { friendService, type Friend } from "@/lib/services/friendService";
+import { teamService, type Team } from "@/lib/services/teamService";
 import { AppShell } from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -52,41 +53,62 @@ function PlayerProfilePage() {
   // Follow/Friend states
   const [friends, setFriends] = useState<Friend[]>([]);
   const [connecting, setConnecting] = useState(false);
+  const [allTeams, setAllTeams] = useState<Team[]>([]);
 
   // Edit Modal states
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({
     name: "",
     mobile: "",
+    email: "",
+    dob: "",
     role: "",
     batting_style: "",
     bowling_style: "",
+    bowling_type: "",
     jersey_number: "",
+    preferred_team_id: "",
     catches: 0,
     run_outs: 0,
     age: "" as string | number,
     city: "",
+    state: "",
+    country: "",
+    profile_photo: "",
+    bio: "",
   });
   const [saving, setSaving] = useState(false);
 
   const fetchProfile = async () => {
     try {
       setLoading(true);
-      const data = await playerService.getPlayerProfile(id);
+      const [data, teamsData] = await Promise.all([
+        playerService.getPlayerProfile(id),
+        teamService.getTeams(),
+      ]);
       setProfile(data);
+      setAllTeams(teamsData);
 
       // Populate Edit Form
       setEditForm({
         name: data.player.name || "",
         mobile: data.player.mobile || "",
-        role: data.player.role || "",
+        email: data.player.email || "",
+        dob: data.player.dob || "",
+        role: data.player.primary_role || data.player.role || "",
         batting_style: data.player.batting_style || "",
         bowling_style: data.player.bowling_style || "",
+        bowling_type: data.player.bowling_type || "",
         jersey_number: data.player.jersey_number || "",
+        preferred_team_id: data.player.preferred_team_id || "",
         catches: data.player.catches || 0,
         run_outs: data.player.run_outs || 0,
         age: data.player.age ?? "",
         city: data.player.city || "",
+        state: data.player.state || "",
+        country: data.player.country || "",
+        profile_photo: data.player.profile_photo || data.player.avatar || "",
+        bio: data.player.bio || "",
       });
 
       // Fetch friends for connection check
@@ -153,6 +175,9 @@ function PlayerProfilePage() {
       const dataToSend = {
         ...editForm,
         age: editForm.age === "" ? null : Number(editForm.age),
+        preferred_team_id: editForm.preferred_team_id === "none_team_placeholder" || editForm.preferred_team_id === "" ? null : editForm.preferred_team_id,
+        primary_role: editForm.role,
+        avatar: editForm.profile_photo || null,
       };
       await playerService.updatePlayerProfile(id, dataToSend);
       toast.success("Profile updated successfully!");
@@ -359,7 +384,7 @@ function PlayerProfilePage() {
               <div className="grid grid-cols-2 gap-4 text-xs">
                 <div>
                   <span className="text-muted-foreground">Player Role</span>
-                  <p className="font-semibold mt-0.5 text-foreground">{player.role || "—"}</p>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.primary_role || player.role || "—"}</p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Age</span>
@@ -374,12 +399,26 @@ function PlayerProfilePage() {
                   <p className="font-semibold mt-0.5 text-foreground">{player.bowling_style || "—"}</p>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Hometown / City</span>
-                  <p className="font-semibold mt-0.5 text-foreground">{player.city || "—"}</p>
+                  <span className="text-muted-foreground">Bowling Type</span>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.bowling_type || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Location</span>
+                  <p className="font-semibold mt-0.5 text-foreground">
+                    {[player.city, player.state, player.country].filter(Boolean).join(", ") || "—"}
+                  </p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Jersey Number</span>
                   <p className="font-semibold mt-0.5 text-foreground">{player.jersey_number ? `#${player.jersey_number}` : "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Email</span>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.email || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">DOB</span>
+                  <p className="font-semibold mt-0.5 text-foreground">{player.dob || "—"}</p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Catches</span>
@@ -390,6 +429,14 @@ function PlayerProfilePage() {
                   <p className="font-semibold mt-0.5 text-foreground">{career.run_outs}</p>
                 </div>
               </div>
+              {player.bio && (
+                <div className="mt-4 pt-3 border-t border-border/40">
+                  <span className="text-muted-foreground text-xs">Bio</span>
+                  <p className="text-xs text-foreground mt-1 bg-muted/30 p-2.5 rounded-xl border border-border/20 leading-relaxed italic">
+                    "{player.bio}"
+                  </p>
+                </div>
+              )}
             </Card>
 
             <div className="space-y-2">
@@ -603,7 +650,7 @@ function PlayerProfilePage() {
 
         {/* Edit Profile Modal Dialog */}
         <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-          <DialogContent className="max-w-md bg-card border-border text-foreground">
+          <DialogContent className="max-w-md bg-card border-border text-foreground max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-lg font-bold">Edit Player Profile</DialogTitle>
             </DialogHeader>
@@ -620,15 +667,61 @@ function PlayerProfilePage() {
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="edit-mobile">Mobile Number</Label>
+                  <Input
+                    id="edit-mobile"
+                    value={editForm.mobile}
+                    onChange={e => setEditForm({ ...editForm, mobile: e.target.value })}
+                    placeholder="Mobile number"
+                    className="bg-background border-border"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-email">Email Address</Label>
+                  <Input
+                    id="edit-email"
+                    type="email"
+                    value={editForm.email}
+                    onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+                    placeholder="Email address"
+                    className="bg-background border-border"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="edit-dob">Date of Birth</Label>
+                  <Input
+                    id="edit-dob"
+                    type="date"
+                    value={editForm.dob}
+                    onChange={e => setEditForm({ ...editForm, dob: e.target.value })}
+                    className="bg-background border-border"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-photo">Profile Photo URL</Label>
+                  <Input
+                    id="edit-photo"
+                    value={editForm.profile_photo}
+                    onChange={e => setEditForm({ ...editForm, profile_photo: e.target.value })}
+                    placeholder="https://example.com/photo.jpg"
+                    className="bg-background border-border"
+                  />
+                </div>
+              </div>
+
               <div className="space-y-1">
-                <Label htmlFor="edit-mobile">Mobile Number</Label>
+                <Label htmlFor="edit-bio">Player Bio</Label>
                 <Input
-                  id="edit-mobile"
-                  value={editForm.mobile}
-                  onChange={e => setEditForm({ ...editForm, mobile: e.target.value })}
-                  placeholder="Mobile number"
+                  id="edit-bio"
+                  value={editForm.bio}
+                  onChange={e => setEditForm({ ...editForm, bio: e.target.value })}
+                  placeholder="A brief background..."
                   className="bg-background border-border"
-                  disabled
                 />
               </div>
 
@@ -652,24 +745,24 @@ function PlayerProfilePage() {
                       <SelectValue placeholder="Select Role" />
                     </SelectTrigger>
                     <SelectContent className="bg-card border-border">
-                      <SelectItem value="Batter">Batter</SelectItem>
+                      <SelectItem value="Batsman">Batsman</SelectItem>
                       <SelectItem value="Bowler">Bowler</SelectItem>
-                      <SelectItem value="All-rounder">All-rounder</SelectItem>
-                      <SelectItem value="Wicket keeper">Wicket keeper</SelectItem>
-                      <SelectItem value="Captain">Captain</SelectItem>
+                      <SelectItem value="All Rounder">All Rounder</SelectItem>
+                      <SelectItem value="Wicket Keeper">Wicket Keeper</SelectItem>
+                      <SelectItem value="Wicket Keeper Batter">Wicket Keeper Batter</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-2">
                 <div className="space-y-1">
                   <Label htmlFor="edit-batting">Batting Style</Label>
                   <Select
                     value={editForm.batting_style}
                     onValueChange={val => setEditForm({ ...editForm, batting_style: val })}
                   >
-                    <SelectTrigger className="bg-background border-border">
+                    <SelectTrigger className="bg-background border-border text-xs px-2">
                       <SelectValue placeholder="Select Style" />
                     </SelectTrigger>
                     <SelectContent className="bg-card border-border">
@@ -684,21 +777,51 @@ function PlayerProfilePage() {
                     value={editForm.bowling_style}
                     onValueChange={val => setEditForm({ ...editForm, bowling_style: val })}
                   >
-                    <SelectTrigger className="bg-background border-border">
+                    <SelectTrigger className="bg-background border-border text-xs px-2">
                       <SelectValue placeholder="Select Style" />
                     </SelectTrigger>
                     <SelectContent className="bg-card border-border">
-                      <SelectItem value="Right-arm fast">Right-arm fast</SelectItem>
-                      <SelectItem value="Right-arm spin">Right-arm spin</SelectItem>
-                      <SelectItem value="Left-arm fast">Left-arm fast</SelectItem>
-                      <SelectItem value="Left-arm spin">Left-arm spin</SelectItem>
-                      <SelectItem value="None">None</SelectItem>
+                      <SelectItem value="Right-arm bowl">Right-arm bowl</SelectItem>
+                      <SelectItem value="Left-arm bowl">Left-arm bowl</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-bowling-type">Bowling Type</Label>
+                  <Select
+                    value={editForm.bowling_type}
+                    onValueChange={val => setEditForm({ ...editForm, bowling_type: val })}
+                  >
+                    <SelectTrigger className="bg-background border-border text-xs px-2">
+                      <SelectValue placeholder="Select Type" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border">
+                      <SelectItem value="Fast">Fast</SelectItem>
+                      <SelectItem value="Medium">Medium</SelectItem>
+                      <SelectItem value="Spin">Spin</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="edit-team">Preferred Team</Label>
+                  <Select
+                    value={editForm.preferred_team_id}
+                    onValueChange={val => setEditForm({ ...editForm, preferred_team_id: val })}
+                  >
+                    <SelectTrigger className="bg-background border-border">
+                      <SelectValue placeholder="Select Team" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border">
+                      <SelectItem value="none_team_placeholder">No Preferred Team</SelectItem>
+                      {allTeams.map(t => (
+                        <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="space-y-1">
                   <Label htmlFor="edit-age">Age</Label>
                   <Input
@@ -710,14 +833,37 @@ function PlayerProfilePage() {
                     className="bg-background border-border"
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
                 <div className="space-y-1">
-                  <Label htmlFor="edit-city">City / Hometown</Label>
+                  <Label htmlFor="edit-city">City</Label>
                   <Input
                     id="edit-city"
                     value={editForm.city}
                     onChange={e => setEditForm({ ...editForm, city: e.target.value })}
                     placeholder="e.g. Mumbai"
-                    className="bg-background border-border"
+                    className="bg-background border-border text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-state">State</Label>
+                  <Input
+                    id="edit-state"
+                    value={editForm.state}
+                    onChange={e => setEditForm({ ...editForm, state: e.target.value })}
+                    placeholder="e.g. MH"
+                    className="bg-background border-border text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="edit-country">Country</Label>
+                  <Input
+                    id="edit-country"
+                    value={editForm.country}
+                    onChange={e => setEditForm({ ...editForm, country: e.target.value })}
+                    placeholder="e.g. India"
+                    className="bg-background border-border text-xs"
                   />
                 </div>
               </div>

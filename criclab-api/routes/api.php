@@ -8,11 +8,13 @@ use App\Http\Controllers\MatchController;
 use App\Http\Controllers\PlayerController;
 use App\Http\Controllers\TeamController;
 use App\Http\Controllers\BackupController;
+use App\Http\Controllers\MigrationController;
 use App\Services\AdminAccountService;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Broadcast;
 
 // Public routes
+Route::get('/migration/export', [MigrationController::class, 'exportMigration']);
 Route::post('/login', [AuthController::class, 'login'])->name('login')->middleware('throttle:6,1');
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/register/admin', [AuthController::class, 'registerAdmin']);
@@ -41,6 +43,7 @@ Route::middleware(['auth:sanctum', 'force_password_change'])->group(function () 
 
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
+    Route::get('/migration/data', [MigrationController::class, 'exportMigrationData']);
     Route::post('/change-password', [AuthController::class, 'changePassword']);
 
     // General reads and writes
@@ -53,6 +56,9 @@ Route::middleware(['auth:sanctum', 'force_password_change'])->group(function () 
     Route::get('/players/man-of-the-day', [PlayerController::class, 'manOfTheDay']);
     Route::get('/players/{id}', [PlayerController::class, 'show']);
     Route::put('/players/{id}', [PlayerController::class, 'update']);
+    Route::get('/players/{id}/statistics', [PlayerController::class, 'statistics']);
+    Route::get('/players/{id}/matches', [PlayerController::class, 'matches']);
+    Route::get('/players/{id}/career', [PlayerController::class, 'career']);
     Route::get('/matches', [MatchController::class, 'index']);
     Route::get('/matches/{id}', [MatchController::class, 'show']);
 
@@ -94,6 +100,7 @@ Route::middleware(['auth:sanctum', 'force_password_change'])->group(function () 
         Route::delete('/teams/{id}', [TeamController::class, 'destroy']);
         Route::delete('/players/{id}', [PlayerController::class, 'destroy']);
         Route::get('/admin/users', [AuthController::class, 'listUsers']);
+        Route::get('/admin/users/sync', [AuthController::class, 'syncUsers']);
         Route::post('/admin/users/{id}/reset-password', [AuthController::class, 'resetPassword']);
     });
 });

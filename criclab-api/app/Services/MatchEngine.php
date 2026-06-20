@@ -122,7 +122,7 @@ class MatchEngine
             // 3. Process Events Sequentially
             foreach ($events as $index => $event) {
                 // If innings ending event is manual or match ended
-                if ($event->event_type === 'INNINGS_ENDED') {
+                if ($event->event_type === 'INNINGS_ENDED' || (isset($event->innings_no) && $event->innings_no > $currentInningsNo)) {
                     $state['innings'][$currentInningsNo]['is_closed'] = true;
                     if ($currentInningsNo === 1) {
                         $currentInningsNo = 2;
@@ -144,7 +144,9 @@ class MatchEngine
                         $state['active_non_striker'] = null;
                         $state['active_bowler'] = null;
                     }
-                    continue;
+                    if ($event->event_type === 'INNINGS_ENDED') {
+                        continue;
+                    }
                 }
 
                 if ($event->event_type === 'MATCH_ENDED') {

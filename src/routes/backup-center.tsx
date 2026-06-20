@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { 
   ArrowLeft, 
   Download, 
@@ -18,7 +19,9 @@ import {
   AlertCircle,
   CheckCircle2,
   Lock,
-  Plus
+  Plus,
+  DatabaseZap,
+  HardDrive
 } from "lucide-react";
 import { backupService, type BackupRegistryEntry } from "@/lib/services/backupService";
 import { matchService } from "@/lib/services/matchService";
@@ -33,16 +36,46 @@ function BackupCenter() {
   const [completedMatches, setCompletedMatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [importingFile, setImportingFile] = useState(false);
+  const [exportingFull, setExportingFull] = useState(false);
+
+  // Clear All Data state
+  const [showClearDialog, setShowClearDialog] = useState(false);
+  const [clearConfirmText, setClearConfirmText] = useState('');
+  const [clearingAll, setClearingAll] = useState(false);
+
+  // Import Dialog states
+  const [importFileToProcess, setImportFileToProcess] = useState<File | null>(null);
+  const [importFileData, setImportFileData] = useState<any | null>(null);
+  const [showImportConfirmDialog, setShowImportConfirmDialog] = useState(false);
+  const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
+  const [importPreview, setImportPreview] = useState<{ matchCount: number; teamCount: number; playerCount: number; dateString: string } | null>(null);
+
+  const handleClearAllData = async () => {
+    if (clearConfirmText !== 'RESET') {
+      toast.error('Type RESET to confirm.');
+      return;
+    }
+    setClearingAll(true);
+    try {
+      await backupService.cleanDatabase();
+      toast.success('All local data cleared. The app will reload now.');
+      setShowClearDialog(false);
+      setTimeout(() => { window.location.href = '/'; }, 1500);
+    } catch (e: any) {
+      toast.error('Failed to clear data: ' + e.message);
+    } finally {
+      setClearingAll(false);
+      setClearConfirmText('');
+    }
+  };
 
   // Load completed matches and backup registry
   const loadData = async () => {
     setLoading(true);
     try {
-      // Get local backup registry
       const localRegistry = backupService.getBackupRegistry();
       setRegistry(localRegistry);
 
-      // Fetch all matches from API (with offline cache fallback in matchService)
       const allMatches = await matchService.getMatches();
       const completed = allMatches.filter(m => m.status === 'past' || m.status === 'completed');
       setCompletedMatches(completed);
@@ -86,25 +119,40 @@ function BackupCenter() {
     loadData();
   }, []);
 
-  // Action: Export JSON Backup
+  // Action: Export JSON Backup (Single Match)
   const handleExportJSON = async (matchId: string) => {
     try {
-      // Get match detail (automatically uses offline cache fallback if offline)
-      const detail = await matchService.getMatch(matchId);
-      const backupData = backupService.generateSingleMatchBackupJSON(matchId, detail);
+      const backupData = await backupService.exportSingleMatchBackup(matchId);
 
       const registryEntry = registry.find(r => r.matchId === matchId);
       const teamsLabel = registryEntry ? registryEntry.teams : "Match";
       const cleanTeamsLabel = teamsLabel.replace(/\s+/g, '_');
-      const filename = `${cleanTeamsLabel}_v${backupData.backupVersion || 1}.json`;
+      const filename = `${cleanTeamsLabel}_v${backupData.version || 1}.json`;
 
-      backupService.downloadBackupFile(filename, backupData);
+      await backupService.saveBackupFileToFilesystem(filename, backupData);
       backupService.saveLocalBackup(matchId, backupData);
       
-      toast.success(`Backup exported: ${filename}`);
+      toast.success(`Backup saved successfully as ${filename}`);
       loadData();
     } catch (e: any) {
       toast.error(`Failed to export backup: ${e.message}`);
+    }
+  };
+
+  // Action: Export Entire Database JSON Backup
+  const handleExportFullBackup = async () => {
+    setExportingFull(true);
+    try {
+      const data = await backupService.exportBackup();
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filename = `criclab_full_backup_${timestamp}.json`;
+
+      await backupService.saveBackupFileToFilesystem(filename, data);
+      toast.success(`Complete backup saved successfully as ${filename}`);
+    } catch (e: any) {
+      toast.error(`Failed to export entire database: ${e.message}`);
+    } finally {
+      setExportingFull(false);
     }
   };
 
@@ -132,7 +180,6 @@ function BackupCenter() {
         });
         toast.success("Shared successfully!");
       } else {
-        // Fallback: Copy to clipboard
         await navigator.clipboard.writeText(shareText);
         toast.success("Match summary copied to clipboard!");
       }
@@ -153,7 +200,6 @@ function BackupCenter() {
 
       const teamName = (tid: string) => teams.find((t: any) => t.id === tid)?.name || "—";
 
-      // Build printable window HTML content
       const printWindow = window.open("", "_blank");
       if (!printWindow) {
         toast.error("Popup blocked! Please allow popups to export PDF/Print.");
@@ -166,7 +212,6 @@ function BackupCenter() {
         const battingTeamId = inn.batting_team_id;
         const bowlingTeamId = inn.bowling_team_id;
 
-        // Batting Card Table rows
         let battersRowsHtml = "";
         const battingPlayers = players.filter((p: any) => p.team_id === battingTeamId);
         battingPlayers.forEach((p: any) => {
@@ -177,11 +222,9 @@ function BackupCenter() {
           const sixes = facedBalls.filter((b: any) => b.runs === 6).length;
           const sr = ballsCount > 0 ? ((runs / ballsCount) * 100).toFixed(1) : "0.0";
           
-          // Find dismissal info
           const wicketBall = innBalls.find((b: any) => b.is_wicket && b.batter_id === p.id);
           let dismissalText = "dnb";
           
-          // Check if they batted
           const hasBatted = facedBalls.length > 0 || innBalls.some((b: any) => b.non_striker_id === p.id);
           if (hasBatted) {
             if (wicketBall) {
@@ -213,7 +256,6 @@ function BackupCenter() {
           }
         });
 
-        // Bowling Card Table rows
         let bowlersRowsHtml = "";
         const bowlingPlayers = players.filter((p: any) => p.team_id === bowlingTeamId);
         bowlingPlayers.forEach((p: any) => {
@@ -228,7 +270,6 @@ function BackupCenter() {
           const econ = legalBalls > 0 ? ((runsConceded / (legalBalls / 6))).toFixed(2) : "0.00";
           const overs = `${Math.floor(legalBalls / 6)}.${legalBalls % 6}`;
 
-          // Calculate Maidens
           const oversGrouped = bowlerBalls.reduce((acc: any, b: any) => {
             const key = `${b.innings_id}_${b.over_number}`;
             if (!acc[key]) acc[key] = [];
@@ -261,7 +302,6 @@ function BackupCenter() {
           `;
         });
 
-        // Extras summary
         const wides = innBalls.filter((b: any) => b.extra_type === "wide").reduce((sum: number, b: any) => sum + (b.extra_runs || 0), 0);
         const noBalls = innBalls.filter((b: any) => b.extra_type === "no_ball").reduce((sum: number, b: any) => sum + (b.extra_runs || 0), 0);
         const byes = innBalls.filter((b: any) => b.extra_type === "bye").reduce((sum: number, b: any) => sum + (b.extra_runs || 0), 0);
@@ -374,9 +414,9 @@ function BackupCenter() {
     }
   };
 
-  // Action: Restore Match from Registry Backup
+  // Action: Restore Match from Registry Backup (defaults to Merge for safety)
   const handleRestoreFromLocal = async (matchId: string) => {
-    if (!confirm("Are you sure you want to restore the match data from the local backup? This will overwrite the current match scoring state.")) return;
+    if (!confirm("Are you sure you want to restore this match data from the local backup? This will safely merge or update records without deleting other matches.")) return;
     try {
       const backupData = backupService.getLocalBackup(matchId);
       if (!backupData) {
@@ -384,16 +424,15 @@ function BackupCenter() {
         return;
       }
 
-      // Convert backupData object back into a File to feed into import
       const jsonStr = JSON.stringify(backupData);
       const blob = new Blob([jsonStr], { type: "application/json" });
       const file = new File([blob], `restore_${matchId}.json`, { type: "application/json" });
 
-      const res = await backupService.importBackup(file);
+      const res = await backupService.importBackup(file, 'merge');
       toast.success(res.message || "Match successfully restored!");
       loadData();
     } catch (e: any) {
-      toast.error(`Restore failed: ${e.response?.data?.message || e.message}`);
+      toast.error(`Restore failed: ${e.message}`);
     }
   };
 
@@ -409,32 +448,50 @@ function BackupCenter() {
         const text = event.target?.result as string;
         const data = JSON.parse(text);
 
-        // Perform strict security and integrity checks
         const validation = backupService.validateBackupJSON(data);
         if (!validation.valid) {
           toast.error(validation.error || "Invalid Backup File", { duration: 6000 });
           return;
         }
 
-        // Call backend or local restoration
-        const fileToUpload = new File([text], file.name, { type: "application/json" });
-        const res = await backupService.importBackup(fileToUpload);
-        
-        // Save imported match locally as well
-        const match = data.matches[0];
-        backupService.saveLocalBackup(match.id, data);
-
-        toast.success(res.message || "Match restored successfully!");
-        loadData();
+        const preview = backupService.previewBackup(data);
+        setImportFileToProcess(file);
+        setImportFileData(data);
+        setImportPreview(preview);
+        setImportMode('merge');
+        setShowImportConfirmDialog(true);
       } catch (err: any) {
-        toast.error(`Failed to import file: ${err.message}`);
+        toast.error(`Failed to parse file: ${err.message}`);
       } finally {
         setImportingFile(false);
-        // Reset file input value
         e.target.value = "";
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importFileToProcess || !importFileData) return;
+    setImportingFile(true);
+    try {
+      const res = await backupService.importBackup(importFileToProcess, importMode);
+      
+      if (importFileData.matches && importFileData.matches.length > 0) {
+        const match = importFileData.matches[0];
+        backupService.saveLocalBackup(match.id, importFileData);
+      }
+
+      toast.success(res.message || "Backup data successfully imported!");
+      setShowImportConfirmDialog(false);
+      setImportFileToProcess(null);
+      setImportFileData(null);
+      setImportPreview(null);
+      loadData();
+    } catch (err: any) {
+      toast.error(`Import failed: ${err.message}`);
+    } finally {
+      setImportingFile(false);
+    }
   };
 
   return (
@@ -456,6 +513,27 @@ function BackupCenter() {
             </p>
           </div>
         </div>
+
+        {/* Global Export Section */}
+        <Card className="p-5 border border-primary/20 bg-gradient-to-br from-card to-card/60 backdrop-blur rounded-2xl shadow-lg relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-2xl pointer-events-none" />
+          
+          <h2 className="text-sm font-black text-white uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <HardDrive className="h-4 w-4 text-primary" /> Database Backup Manager
+          </h2>
+          <p className="text-[11px] text-muted-foreground mb-4">
+            Export all CricEngine V2 stats, matches, teams, squads, settings, and player history to a secure offline JSON file.
+          </p>
+
+          <Button
+            onClick={handleExportFullBackup}
+            disabled={exportingFull}
+            className="w-full flex items-center justify-center gap-2 text-xs h-10 bg-gradient-to-r from-primary to-orange-600 hover:opacity-95 text-white font-black uppercase tracking-wider rounded-xl shadow-md transition-transform active:scale-95 cursor-pointer"
+          >
+            {exportingFull ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {exportingFull ? "Generating Backup..." : "Export Complete Database Backup"}
+          </Button>
+        </Card>
 
         {/* Global Import Section */}
         <Card className="p-5 border border-primary/20 bg-gradient-to-br from-card to-card/60 backdrop-blur rounded-2xl shadow-lg relative overflow-hidden">
@@ -489,6 +567,157 @@ function BackupCenter() {
             </div>
           </div>
         </Card>
+
+        {/* ── Danger Zone ── */}
+        <Card className="p-5 border border-red-500/30 bg-gradient-to-br from-red-950/20 to-card rounded-2xl shadow-lg relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-28 h-28 bg-red-500/5 rounded-full blur-2xl pointer-events-none" />
+          <h2 className="text-sm font-black text-red-400 uppercase tracking-wider mb-1 flex items-center gap-2">
+            <DatabaseZap className="h-4 w-4" /> Danger Zone
+          </h2>
+          <p className="text-[11px] text-muted-foreground mb-4">
+            Permanently wipe all local matches, players, teams, and ball events from this device. This cannot be undone.
+          </p>
+          <Button
+            variant="destructive"
+            className="w-full gap-2 font-black text-sm rounded-xl"
+            onClick={() => { setClearConfirmText(''); setShowClearDialog(true); }}
+          >
+            <Trash2 className="h-4 w-4" />
+            Clear All Local Data
+          </Button>
+        </Card>
+
+        {/* ── Clear All Confirmation Dialog ── */}
+        <Dialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+          <DialogContent className="max-w-sm rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-red-400 flex items-center gap-2">
+                <DatabaseZap className="h-5 w-5" /> Clear All Data?
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
+                <p className="text-xs text-red-300 font-semibold leading-relaxed">
+                  ⚠️ This will permanently delete <strong>all matches, players, teams, and ball events</strong> from this device's local database. Only the admin account will remain.
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-2">Type <strong className="text-foreground font-black">RESET</strong> to confirm:</p>
+                <Input
+                  value={clearConfirmText}
+                  onChange={e => setClearConfirmText(e.target.value.toUpperCase())}
+                  placeholder="Type RESET here"
+                  className="font-mono tracking-widest text-center border-red-500/40 focus:border-red-500"
+                />
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="ghost" onClick={() => setShowClearDialog(false)} disabled={clearingAll}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={clearConfirmText !== 'RESET' || clearingAll}
+                onClick={handleClearAllData}
+                className="gap-2"
+              >
+                {clearingAll ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                {clearingAll ? 'Clearing...' : 'Yes, Clear Everything'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ── Import Validation & Confirmation Dialog ── */}
+        <Dialog open={showImportConfirmDialog} onOpenChange={setShowImportConfirmDialog}>
+          <DialogContent className="max-w-md rounded-2xl bg-card border border-border text-foreground">
+            <DialogHeader>
+              <DialogTitle className="text-white flex items-center gap-2 font-black uppercase text-sm tracking-wide">
+                <Upload className="h-5 w-5 text-primary" /> Confirm Import
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              {importPreview && (
+                <div className="p-3 bg-muted/10 border border-border/40 rounded-xl space-y-2">
+                  <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Backup File Preview</h3>
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="bg-card p-2 rounded-lg border border-border/20">
+                      <span className="text-[10px] text-muted-foreground block">Matches</span>
+                      <span className="font-bold text-white">{importPreview.matchCount}</span>
+                    </div>
+                    <div className="bg-card p-2 rounded-lg border border-border/20">
+                      <span className="text-[10px] text-muted-foreground block">Teams</span>
+                      <span className="font-bold text-primary">{importPreview.teamCount}</span>
+                    </div>
+                    <div className="bg-card p-2 rounded-lg border border-border/20">
+                      <span className="text-[10px] text-muted-foreground block">Players</span>
+                      <span className="font-bold text-white">{importPreview.playerCount}</span>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground text-center pt-1">
+                    Exported: {importPreview.dateString}
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">Import Strategy</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div 
+                    onClick={() => setImportMode('merge')}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                      importMode === 'merge' 
+                        ? 'bg-primary/10 border-primary shadow-[0_0_12px_rgba(245,158,11,0.15)] text-foreground' 
+                        : 'bg-muted/5 border-border/40 text-muted-foreground hover:bg-muted/10'
+                    }`}
+                  >
+                    <span className="text-xs font-bold block mb-1">Merge Backup</span>
+                    <span className="text-[9px] leading-relaxed block">
+                      Safely upsert match data. Updates existing matches without deleting others. (Recommended)
+                    </span>
+                  </div>
+
+                  <div 
+                    onClick={() => setImportMode('replace')}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                      importMode === 'replace' 
+                        ? 'bg-red-500/10 border-red-500 shadow-[0_0_12px_rgba(239,68,68,0.15)] text-foreground' 
+                        : 'bg-muted/5 border-border/40 text-muted-foreground hover:bg-muted/10'
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-red-400 block mb-1">Overwrite DB</span>
+                    <span className="text-[9px] leading-relaxed block">
+                      Destructive restore. Wipes all matches, players, and teams before applying backup.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {importMode === 'replace' && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-2.5">
+                  <AlertCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+                  <p className="text-[10px] text-red-300 leading-normal font-semibold">
+                    Warning: Replacing the database will erase all current offline stats and matches permanently. Only use if restoring to a fresh system.
+                  </p>
+                </div>
+              )}
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="ghost" onClick={() => { setShowImportConfirmDialog(false); setImportFileToProcess(null); }} disabled={importingFile}>
+                Cancel
+              </Button>
+              <Button
+                variant={importMode === 'replace' ? 'destructive' : 'default'}
+                disabled={importingFile}
+                onClick={handleConfirmImport}
+                className="gap-2"
+              >
+                {importingFile && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+                {importingFile ? 'Restoring...' : 'Proceed with Restore'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* List of Matches and Export Status */}
         <div className="space-y-3">

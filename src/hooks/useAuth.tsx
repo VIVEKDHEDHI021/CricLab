@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { authService, type AuthUser } from "@/lib/services/authService";
 import { getToken, clearToken } from "@/lib/api";
+import { sqliteService } from "@/lib/services/sqliteService";
 import { toast } from "sonner";
 
 export type Role = "admin" | "user" | "scorer" | null;
@@ -53,6 +54,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const setGuestUser = () => {
+    setUser({
+      id: "guest",
+      name: "Guest Viewer",
+      username: "guest",
+      mobile: "0000000000",
+      role: "user",
+      is_profile_setup_completed: true,
+      must_change_password: false,
+    });
+    setRole("user");
+    setProfileName("Guest Viewer");
+    setMobile("0000000000");
+    setIsProfileSetupCompleted(true);
+    setMustChangePassword(false);
+  };
+
   const setAuthUser = (me: AuthUser) => {
     setUser(me);
     setRole(me.role);
@@ -64,27 +82,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadUser = async () => {
     try {
-      const me = await withTimeout(authService.getMe(), 60000, "Session verification timed out.");
+      const me = await withTimeout(authService.getMe(), 5000, "Session verification timed out.");
       setAuthUser(me);
     } catch (err: any) {
-      setUser(null);
-      setRole(null);
-      setProfileName(null);
-      setMobile(null);
-      setIsProfileSetupCompleted(false);
-      setMustChangePassword(false);
-      clearToken();
-      toast.error(err.message || "Session verification failed. Please sign in again.");
+      setGuestUser();
+      await clearToken();
     }
   };
 
   useEffect(() => {
-    const token = getToken();
-    if (token) {
-      loadUser().finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+    const initApp = async () => {
+      try {
+        await sqliteService.initialize();
+        const token = await getToken();
+        if (token) {
+          await loadUser();
+        } else {
+          setGuestUser();
+        }
+      } catch (err: any) {
+        console.error("Initialization failed", err);
+        setGuestUser();
+      } finally {
+        setLoading(false);
+      }
+    };
+    initApp();
   }, []);
 
   const refreshRole = async () => {
@@ -98,13 +121,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // ignore logout errors
     }
 
-    clearToken();
-    setUser(null);
-    setRole(null);
-    setProfileName(null);
-    setMobile(null);
-    setIsProfileSetupCompleted(false);
-    setMustChangePassword(false);
+    await clearToken();
+    setGuestUser();
   };
 
   return (

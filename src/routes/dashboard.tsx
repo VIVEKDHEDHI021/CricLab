@@ -1,13 +1,15 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { MatchCard, MatchSummary } from "@/components/MatchCard";
 import { fetchMatchSummaries } from "@/lib/match";
 import { useAuth } from "@/hooks/useAuth";
 import { matchService } from "@/lib/services/matchService";
+import { sqliteService } from "@/lib/services/sqliteService";
 import { toast } from "sonner";
 import { Link } from "@tanstack/react-router";
 import { playerService } from "@/lib/services/playerService";
+import { eventBus } from "@/engine/v2/events/eventBus";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -235,14 +237,76 @@ function SectionSkeleton({ heightClass = "h-24" }: { heightClass?: string }) {
 function Dashboard() {
   const { role } = useAuth();
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [resumableMatch, setResumableMatch] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubSnapshot = eventBus.subscribe("SnapshotUpdated", () => {
+      qc.invalidateQueries({ queryKey: ["matches"] });
+    });
+    const unsubCompleted = eventBus.subscribe("MatchCompleted", () => {
+      qc.invalidateQueries({ queryKey: ["matches"] });
+      qc.invalidateQueries({ queryKey: ["manOfTheDay"] });
+      qc.invalidateQueries({ queryKey: ["playerRankings"] });
+    });
+    return () => {
+      unsubSnapshot();
+      unsubCompleted();
+    };
+  }, [qc]);
+
+  useEffect(() => {
+    const checkLiveMatch = async () => {
+      try {
+        // Find any match still marked 'live' in SQLite
+        const liveMatches = await sqliteService.query(
+          "SELECT id, result FROM v2_matches WHERE status = 'live' LIMIT 5;"
+        );
+        if (!liveMatches || liveMatches.length === 0) return;
+
+        for (const candidate of liveMatches) {
+          const matchId = candidate.id;
+
+          // Skip if the user has already dismissed this resume prompt
+          const dismissedKey = `criclab_dismissed_resume_${matchId}`;
+          if (localStorage.getItem(dismissedKey) === '1') continue;
+
+          // Skip if this match already has a result text — it's actually done
+          if (candidate.result && candidate.result.trim() !== '') {
+            // Auto-heal: mark it past so it never triggers again
+            await sqliteService.run("UPDATE matches SET status = 'past' WHERE id = ?;", [matchId]);
+            await sqliteService.run("UPDATE v2_matches SET status = 'past' WHERE id = ?;", [matchId]);
+            continue;
+          }
+
+          // Skip if both innings are closed — match is done
+          const closedInnings = await sqliteService.query(
+            "SELECT COUNT(*) as cnt FROM v2_innings WHERE match_id = ? AND is_closed = 1;",
+            [matchId]
+          );
+          if (closedInnings && closedInnings[0]?.cnt >= 2) {
+            await sqliteService.run("UPDATE matches SET status = 'past' WHERE id = ?;", [matchId]);
+            await sqliteService.run("UPDATE v2_matches SET status = 'past' WHERE id = ?;", [matchId]);
+            continue;
+          }
+
+          // This is a genuinely active live match — show a dismissible banner
+          setResumableMatch(matchId);
+          return;
+        }
+      } catch (err) {
+        console.error("Auto-resume check failed", err);
+      }
+    };
+    checkLiveMatch();
+  }, [navigate]);
+
   const { data, isLoading: isLoadingMatches, isError: isErrorMatches, refetch: refetchMatches } = useQuery({
     queryKey: ["matches"],
     queryFn: fetchMatchSummaries,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     retry: 1,
-    refetchInterval: (query) => {
-      const matches = query.state.data as any[];
-      return matches?.some((m: any) => m.status === 'live') ? 5000 : false;
-    }
   });
   
   const { data: motd, isLoading: isLoadingMotd, isError: isErrorMotd, refetch: refetchMotd } = useQuery({
@@ -261,9 +325,7 @@ function Dashboard() {
   const live = items.filter((m) => m.status === "live");
   const past = items.filter((m) => m.status === "past");
 
-  const [heroData, setHeroData] = useState<any[]>([]);
-  const [loadingHeroes, setLoadingHeroes] = useState(false);
-  const [heroesError, setHeroesError] = useState(false);
+  const [appreciatedKeys, setAppreciatedKeys] = useState<Record<string, number>>({});
   const [currentIndex, setCurrentIndex] = useState(0);
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const [showConfetti, setShowConfetti] = useState(false);
@@ -539,48 +601,55 @@ function Dashboard() {
     });
   };
 
-  const fetchHeroes = async () => {
-    if (past.length < 3) return;
-    try {
-      setLoadingHeroes(true);
-      setHeroesError(false);
+  const { data: heroDataList, isLoading: loadingHeroes, isError: heroesError } = useQuery({
+    queryKey: ["heroData", past.map(m => m.id).slice(0, 3).join(",")],
+    queryFn: async () => {
+      if (past.length < 3) return [];
       const latest3 = past.slice(0, 3);
-      const matchDetails = await Promise.all(
-        latest3.map((m) => matchService.getMatch(m.id))
-      );
-      const cards = computeHeroCards(matchDetails);
-      setHeroData(cards);
-    } catch (e) {
-      console.error("Failed to load hero data", e);
-      setHeroesError(true);
-    } finally {
-      setLoadingHeroes(false);
-    }
-  };
+      const matchDetails: any[] = [];
+      for (const m of latest3) {
+        try {
+          const detail = await matchService.getMatch(m.id);
+          if (detail && detail.players && detail.balls) {
+            matchDetails.push(detail);
+          }
+        } catch (e) {
+          console.error(`Failed to load details for match ${m.id}`, e);
+        }
+      }
+      if (matchDetails.length === 0) return [];
+      return computeHeroCards(matchDetails);
+    },
+    enabled: past.length >= 3,
+    retry: 1
+  });
 
-  useEffect(() => {
-    if (past.length >= 3) {
-      fetchHeroes();
-    }
-  }, [past.length]);
+  const heroData = useMemo(() => {
+    if (!heroDataList) return [];
+    return heroDataList.map((h) => {
+      const key = `${h.type}_${h.playerId}`;
+      if (appreciatedKeys[key] !== undefined) {
+        return {
+          ...h,
+          userAppreciated: true,
+          appreciationCount: appreciatedKeys[key]
+        };
+      }
+      return h;
+    });
+  }, [heroDataList, appreciatedKeys]);
 
   // Slide Controls
   const nextSlide = () => {
-    setHeroData((prev) => {
-      if (prev.length > 0) {
-        setCurrentIndex((curr) => (curr + 1) % prev.length);
-      }
-      return prev;
-    });
+    if (heroData.length > 0) {
+      setCurrentIndex((curr) => (curr + 1) % heroData.length);
+    }
   };
 
   const prevSlide = () => {
-    setHeroData((prev) => {
-      if (prev.length > 0) {
-        setCurrentIndex((curr) => (curr - 1 + prev.length) % prev.length);
-      }
-      return prev;
-    });
+    if (heroData.length > 0) {
+      setCurrentIndex((curr) => (curr - 1 + heroData.length) % heroData.length);
+    }
   };
 
   useEffect(() => {
@@ -621,14 +690,10 @@ function Dashboard() {
     const baseCount = getBaseAppreciation(playerId, heroType);
     localStorage.setItem(countKey, String(baseCount + 1));
 
-    setHeroData((prev) =>
-      prev.map((h) => {
-        if (h.type === heroType && h.playerId === playerId) {
-          return { ...h, userAppreciated: true, appreciationCount: baseCount + 1 };
-        }
-        return h;
-      })
-    );
+    setAppreciatedKeys((prev) => ({
+      ...prev,
+      [`${heroType}_${playerId}`]: baseCount + 1
+    }));
 
     if (navigator.vibrate) {
       navigator.vibrate([80, 50, 80]);
@@ -712,7 +777,39 @@ function Dashboard() {
   return (
     <AppShell>
       <div className="space-y-6 max-w-md mx-auto">
+
+        {/* ── Live Match Resume Banner ── */}
+        {resumableMatch && (
+          <div className="flex items-center justify-between gap-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl px-4 py-3 shadow-sm animate-in slide-in-from-top-2 duration-300">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="flex h-2.5 w-2.5 relative shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+              </span>
+              <span className="text-sm font-bold text-emerald-500 truncate">Live match in progress</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => navigate({ to: `/matches/${resumableMatch}/score` })}
+                className="text-xs font-bold bg-emerald-500 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-600 transition-colors"
+              >
+                Resume
+              </button>
+              <button
+                onClick={() => {
+                  localStorage.setItem(`criclab_dismissed_resume_${resumableMatch}`, '1');
+                  setResumableMatch(null);
+                }}
+                className="text-xs font-semibold text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Man of the Day Section */}
+
         {isLoadingMotd ? (
           <SectionSkeleton />
         ) : isErrorMotd ? (
@@ -799,7 +896,7 @@ function Dashboard() {
           ) : loadingHeroes ? (
             <SectionSkeleton heightClass="h-48" />
           ) : heroesError ? (
-            <SectionError message="Failed to load CricLab Heroes." onRetry={fetchHeroes} />
+            <SectionError message="Failed to load CricLab Heroes." onRetry={() => qc.invalidateQueries({ queryKey: ["heroData"] })} />
           ) : past.length < 3 ? (
             <Card className="p-6 text-center border border-amber-500/20 bg-card dark:bg-slate-900/60 backdrop-blur-md rounded-2xl shadow-[0_0_15px_rgba(245,158,11,0.05)] relative overflow-hidden my-1">
               <div className="absolute -top-10 -left-10 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
@@ -808,12 +905,13 @@ function Dashboard() {
               <p className="text-xs text-muted-foreground/80 max-w-xs mx-auto leading-relaxed">
                 Play and complete at least 3 matches to unlock your players' stats in the premium Heroes Showcase!
               </p>
-              <Link to="/matches/new" className="inline-block mt-4">
-                <Button size="sm" className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-[11px] uppercase tracking-wider px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/20 active:scale-97 transition-all cursor-pointer">
-                  Create Match
-                </Button>
-              </Link>
-            </Card>
+              {(role === "admin" || role === "scorer") && (
+                <Link to="/matches/new" className="inline-block mt-4">
+                  <Button size="sm" className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-[11px] uppercase tracking-wider px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/20 active:scale-97 transition-all cursor-pointer">
+                    Create Match
+                  </Button>
+                </Link>
+              )}            </Card>
           ) : heroData.length > 0 && currentHero ? (
             <div 
               className="relative overflow-hidden touch-pan-y"

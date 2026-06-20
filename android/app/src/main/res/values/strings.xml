@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CricLab</string>
+    <string name="title_activity_main">CricLab</string>
+    <string name="package_name">com.criclab.app</string>
+    <string name="custom_url_scheme">com.criclab.app</string>
+</resources>

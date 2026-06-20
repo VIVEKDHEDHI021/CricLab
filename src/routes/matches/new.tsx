@@ -163,6 +163,7 @@ function NewMatch() {
   const [startStatusText, setStartStatusText] = useState("");
 
   const teamAInputRef = useRef<HTMLInputElement>(null);
+  const isStartingMatchRef = useRef(false);
 
   // Load backend teams and players
   const loadData = async () => {
@@ -641,6 +642,8 @@ function NewMatch() {
 
   // Start scoring match setup flow
   const handleStartMatch = async () => {
+    if (isStartingMatchRef.current) return;
+    isStartingMatchRef.current = true;
     setIsStartingMatch(true);
     try {
       // 1. Create Team A if new
@@ -725,8 +728,8 @@ function NewMatch() {
         }
       }
 
-      // 5. Create Match
-      setStartStatusText("Creating match entry...");
+      // 5. Create Match & Initialize Innings 1 (Consolidated)
+      setStartStatusText("Creating match and starting first innings...");
       const matchRes = await matchService.createMatch({
         team_a_id: finalTeamAId,
         team_b_id: finalTeamBId,
@@ -742,18 +745,11 @@ function NewMatch() {
         squad_b_ids: finalPlayerIdsB,
       });
 
-      // 6. Initialize Innings 1
-      setStartStatusText("Initializing first innings...");
-      await inningsService.startInnings(matchRes.id, {
-        batting_team_id: battingFirst === 'a' ? finalTeamAId : finalTeamBId,
-        bowling_team_id: battingFirst === 'a' ? finalTeamBId : finalTeamAId,
-        innings_no: 1,
-      });
-
       toast.success("Match started successfully!");
       nav({ to: `/matches/$id/score`, params: { id: matchRes.id } });
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || "Failed to initialize match");
+      isStartingMatchRef.current = false;
     } finally {
       setIsStartingMatch(false);
     }

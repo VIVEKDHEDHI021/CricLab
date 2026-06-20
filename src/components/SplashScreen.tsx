@@ -1,41 +1,40 @@
 import React, { useEffect, useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
 
 export function SplashScreen() {
+  const { loading } = useAuth();
   const [progress, setProgress] = useState(0);
   const [visible, setVisible] = useState(true);
   const [animatingOut, setAnimatingOut] = useState(false);
 
   useEffect(() => {
-    const duration = 4000;
-    const intervalTime = 40;
-    const increment = 100 / (duration / intervalTime);
+    if (loading) {
+      const interval = setInterval(() => {
+        setProgress((prev) => {
+          if (prev >= 90) {
+            clearInterval(interval);
+            return 90;
+          }
+          return prev + (90 - prev) * 0.08;
+        });
+      }, 100);
+      return () => clearInterval(interval);
+    } else {
+      setProgress(100);
+      const fadeOutTimer = setTimeout(() => {
+        setAnimatingOut(true);
+      }, 200);
 
-    const progressTimer = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(progressTimer);
-          return 100;
-        }
-        return Math.min(prev + increment, 100);
-      });
-    }, intervalTime);
+      const removeTimer = setTimeout(() => {
+        setVisible(false);
+      }, 700);
 
-    // Start fading out after 4 seconds
-    const fadeOutTimer = setTimeout(() => {
-      setAnimatingOut(true);
-    }, duration);
-
-    // Remove from DOM after transition completes (duration + 500ms)
-    const removeTimer = setTimeout(() => {
-      setVisible(false);
-    }, duration + 500);
-
-    return () => {
-      clearInterval(progressTimer);
-      clearTimeout(fadeOutTimer);
-      clearTimeout(removeTimer);
-    };
-  }, []);
+      return () => {
+        clearTimeout(fadeOutTimer);
+        clearTimeout(removeTimer);
+      };
+    }
+  }, [loading]);
 
   if (!visible) return null;
 

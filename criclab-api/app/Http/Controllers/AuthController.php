@@ -36,20 +36,33 @@ class AuthController extends Controller
         }
 
         try {
-            $mobile = AdminAccountService::normalizeMobile($request->mobile);
-            Log::debug("Mobile number normalized", ['original' => $request->mobile, 'normalized' => $mobile]);
+            $loginInput = $request->mobile;
+            $account = null;
 
-            if (AdminAccountService::isBootstrapLogin($mobile, $request->password, $request->expected_role)) {
-                Log::info("Bootstrap login match found", ['mobile' => $mobile, 'role' => $request->expected_role]);
-                $account = AdminAccountService::ensureBootstrapAccount($mobile, $request->expected_role);
-                if ($account) {
-                    Log::info("Bootstrap login succeeded", ['user_id' => $account->id]);
-                    return $this->loginResponse($account);
+            if (filter_var($loginInput, FILTER_VALIDATE_EMAIL)) {
+                Log::debug("Login input identified as email", ['email' => $loginInput]);
+                $account = Account::where('email', $loginInput)->first();
+            } else {
+                if (preg_match('/^[0-9+\s()-]+$/', $loginInput)) {
+                    $mobile = AdminAccountService::normalizeMobile($loginInput);
+                    Log::debug("Mobile number normalized", ['original' => $loginInput, 'normalized' => $mobile]);
+
+                    if (AdminAccountService::isBootstrapLogin($mobile, $request->password, $request->expected_role)) {
+                        Log::info("Bootstrap login match found", ['mobile' => $mobile, 'role' => $request->expected_role]);
+                        $account = AdminAccountService::ensureBootstrapAccount($mobile, $request->expected_role);
+                        if ($account) {
+                            Log::info("Bootstrap login succeeded", ['user_id' => $account->id]);
+                            return $this->loginResponse($account);
+                        }
+                    }
+                    $account = Account::where('mobile', $mobile)->first();
+                } else {
+                    Log::debug("Login input identified as username", ['username' => $loginInput]);
+                    $account = Account::where('username', $loginInput)->first();
                 }
             }
 
-            $account = Account::where('mobile', $mobile)->first();
-            Log::debug("User lookup complete", ['found' => $account !== null, 'mobile' => $mobile]);
+            Log::debug("User lookup complete", ['found' => $account !== null, 'input' => $loginInput]);
 
             if (!$account) {
                 Log::warning("Login failed: User not found in database", ['mobile' => $mobile]);
@@ -301,6 +314,29 @@ class AuthController extends Controller
     {
         $users = Account::select('id', 'name', 'mobile', 'email', 'role', 'must_change_password')->get();
         return response()->json($users);
+    }
+
+    /**
+     * Returns all accounts WITH their hashed passwords for device-side offline credential sync.
+     * Admin-only. Intended for one-time use while the device is online.
+     */
+    public function syncUsers(Request $request)
+    {
+        $users = Account::select('id', 'name', 'username', 'mobile', 'email', 'role', 'password', 'must_change_password')->get();
+
+        return response()->json(
+            $users->map(fn ($u) => [
+                'id'                         => $u->id,
+                'name'                       => $u->name,
+                'username'                   => $u->username,
+                'mobile'                     => $u->mobile,
+                'email'                      => $u->email,
+                'role'                       => $u->role ?? 'user',
+                'password'                   => $u->password,   // bcrypt hash
+                'must_change_password'       => (bool) $u->must_change_password,
+                'is_profile_setup_completed' => true,
+            ])->values()  // Force sequential keys → JSON array, not object
+        );
     }
 
     public function resetPassword(Request $request, $id)

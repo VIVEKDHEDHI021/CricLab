@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { 
-  Users, Key, Search, Loader2, Phone, Mail, CheckCircle2, AlertTriangle, Copy, ShieldAlert
+  Users, Key, Search, Loader2, Phone, Mail, CheckCircle2, AlertTriangle, Copy, ShieldAlert, CloudDownload
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin/users")({
@@ -33,6 +34,10 @@ function AdminUsersPage() {
 
   // Success dialog (to show the password once)
   const [isSuccessOpen, setIsSuccessOpen] = useState(false);
+
+  // Sync-all-users dialog state
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0, name: '' });
 
   useEffect(() => {
     if (!loading) {
@@ -61,6 +66,23 @@ function AdminUsersPage() {
       fetchUsers();
     }
   }, [user, role]);
+
+  const handleSyncUsers = async () => {
+    setIsSyncing(true);
+    setSyncProgress({ current: 0, total: 0, name: 'Starting sync...' });
+    try {
+      const { synced, errors } = await authService.syncAllUsersLocally(
+        (current, total, name) => setSyncProgress({ current, total, name })
+      );
+      toast.success(`Sync complete — ${synced} user${synced !== 1 ? 's' : ''} saved locally${errors > 0 ? `, ${errors} error(s)` : ''}.`);
+      fetchUsers(); // Refresh the visible list
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Failed to sync users from server.');
+    } finally {
+      setIsSyncing(false);
+      setSyncProgress({ current: 0, total: 0, name: '' });
+    }
+  };
 
   const handleResetPassword = async () => {
     if (!resettingUser) return;
@@ -121,9 +143,21 @@ function AdminUsersPage() {
               <p className="text-xs text-muted-foreground">{users.length} registered accounts</p>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={fetchUsers} className="text-xs h-8">
-            Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSyncUsers}
+              disabled={isSyncing}
+              className="text-xs h-8 gap-1.5 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10"
+            >
+              {isSyncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CloudDownload className="h-3.5 w-3.5" />}
+              Sync Users
+            </Button>
+            <Button variant="outline" size="sm" onClick={fetchUsers} className="text-xs h-8">
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {/* Search Input */}
@@ -259,6 +293,39 @@ function AdminUsersPage() {
               I have saved the password
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sync Users Progress Dialog */}
+      <Dialog open={isSyncing}>
+        <DialogContent className="max-w-sm bg-card border-border text-foreground">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <CloudDownload className="h-5 w-5 text-emerald-500" />
+              Syncing Users from Server
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 my-2">
+            <p className="text-xs text-muted-foreground">
+              Downloading all registered accounts and saving them locally so they can log in offline.
+            </p>
+            {syncProgress.total > 0 && (
+              <>
+                <Progress
+                  value={Math.round((syncProgress.current / syncProgress.total) * 100)}
+                  className="h-2"
+                />
+                <p className="text-xs text-center text-muted-foreground">
+                  {syncProgress.current} / {syncProgress.total} — <span className="text-foreground font-medium">{syncProgress.name}</span>
+                </p>
+              </>
+            )}
+            {syncProgress.total === 0 && (
+              <div className="flex justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </AppShell>

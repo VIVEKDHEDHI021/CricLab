@@ -11,13 +11,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ballService } from "@/lib/services/ballService";
+import { UndoEngine } from "@/engine/v2/services/undoEngine";
+import { sqliteService } from "@/lib/services/sqliteService";
 import { echoClient, updateEchoAuth } from "@/lib/echo";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { Plus, User, Search, RefreshCw, Trash2, AlertCircle } from "lucide-react";
-import { indexedDbService } from "@/lib/services/indexedDbService";
-import { matchEngine, type BallEventData } from "@/lib/services/matchEngine";
+import { eventBus } from "@/engine/v2/events/eventBus";
 
 export const Route = createFileRoute("/matches/$id/")({ component: MatchDetails });
 
@@ -34,107 +34,67 @@ function MatchDetails() {
     queryKey: ["match", id],
     queryFn: () => matchService.getMatch(id),
     staleTime: 0,
-    refetchOnWindowFocus: true,
-    refetchInterval: (query) => {
-      const matchData = query.state.data as any;
-      const status = matchData?.m?.status;
-      return status === 'live' || status === 'upcoming' ? 3000 : false;
-    }
+    refetchOnWindowFocus: true
   });
 
-  // Local events for optimistic consistency with the scoring page
-  const [localEvents, setLocalEvents] = useState<BallEventData[]>([]);
-  const [hasUnsynced, setHasUnsynced] = useState(false);
-
   useEffect(() => {
-    const loadLocal = async () => {
-      try {
-        const events = await indexedDbService.getBallEvents(id);
-        setLocalEvents(events);
-        const queue = await indexedDbService.getSyncQueue(id);
-        setHasUnsynced(queue.some(q => q.status === 'pending'));
-      } catch (e) {
-        // ignore – offline or no IndexedDB support
+    const unsubSnapshot = eventBus.subscribe("SnapshotUpdated", (payload) => {
+      if (payload.matchId === id) {
+        queryClient.invalidateQueries({ queryKey: ["match", id] });
       }
+    });
+    const unsubCompleted = eventBus.subscribe("MatchCompleted", (payload) => {
+      if (payload.matchId === id) {
+        queryClient.invalidateQueries({ queryKey: ["match", id] });
+      }
+    });
+    const unsubInnings = eventBus.subscribe("InningsCompleted", (payload) => {
+      if (payload.matchId === id) {
+        queryClient.invalidateQueries({ queryKey: ["match", id] });
+      }
+    });
+    const unsubBallAdded = eventBus.subscribe("BallAdded", (payload) => {
+      if (payload.matchId === id) {
+        queryClient.invalidateQueries({ queryKey: ["match", id] });
+      }
+    });
+    const unsubBallCorrected = eventBus.subscribe("BallCorrected", (payload) => {
+      if (payload.matchId === id) {
+        queryClient.invalidateQueries({ queryKey: ["match", id] });
+      }
+    });
+    const unsubBallUndone = eventBus.subscribe("BallUndone", (payload) => {
+      if (payload.matchId === id) {
+        queryClient.invalidateQueries({ queryKey: ["match", id] });
+      }
+    });
+
+    return () => {
+      unsubSnapshot();
+      unsubCompleted();
+      unsubInnings();
+      unsubBallAdded();
+      unsubBallCorrected();
+      unsubBallUndone();
     };
-    loadLocal();
-    // Poll local events every 2 seconds so this page stays in sync with scoring page
-    const interval = setInterval(loadLocal, 2000);
-    return () => clearInterval(interval);
-  }, [id]);
+  }, [id, queryClient]);
 
-  const { m, teams, innings: serverInnings, players, balls: serverBalls } = (data || {}) as any;
+  const {
+    m,
+    teams,
+    innings: serverInnings,
+    players,
+    balls: serverBalls,
+    snapshot,
+    playerStats: serverPlayerStats,
+    bowlerStats,
+    fieldingStats,
+    matchAwards,
+    partnerships
+  } = (data || {}) as any;
 
-  // --- Optimistic State (same as scoring page) ---
-  // Apply local events on top of server state so the scoreboard stays
-  // consistent with the live scoring page even when there are unsynced events.
-  const derivedState = useMemo(() => {
-    if (!m || !localEvents || localEvents.length === 0) return null;
-    try {
-      return matchEngine.replay(localEvents, {
-        id: m.id,
-        team_a_id: m.team_a_id,
-        team_b_id: m.team_b_id,
-        batting_first_id: m.batting_first_id,
-        overs: m.overs,
-        wide_run: m.wide_run ?? 1,
-        noball_run: m.noball_run ?? 1,
-        last_man_batting: m.last_man_batting ?? false,
-        squad_a_ids: m.squad_a_ids ?? [],
-        squad_b_ids: m.squad_b_ids ?? [],
-      });
-    } catch (e) {
-      return null;
-    }
-  }, [m, localEvents]);
-
-  // Merge server innings with optimistic derived state
-  const innings = useMemo(() => {
-    if (!serverInnings) return [];
-    if (!derivedState) return serverInnings;
-    return serverInnings.map((inn: any) => {
-      const derived = derivedState.innings[inn.innings_no];
-      if (derived) {
-        return {
-          ...inn,
-          runs: derived.runs,
-          wickets: derived.wickets,
-          legal_balls: derived.legal_balls,
-          is_closed: derived.is_closed,
-        };
-      }
-      return inn;
-    });
-  }, [serverInnings, derivedState]);
-
-  // Merge balls: use derived balls when available (they reflect local events)
-  const balls = useMemo(() => {
-    if (!serverInnings || !serverBalls) return [];
-    if (!derivedState || derivedState.balls.length === 0) return serverBalls;
-    // Map derived balls back to the same shape as server balls, using innings_id from server
-    return derivedState.balls.map((b: any) => {
-      const inn = (serverInnings ?? []).find((i: any) => i.innings_no === b.innings_no);
-      return {
-        id: b.id,
-        innings_id: inn?.id ?? `local_inn_${b.innings_no}`,
-        match_id: m.id,
-        ball_index: b.ball_index,
-        over_number: b.over_number,
-        ball_in_over: b.ball_in_over,
-        batter_id: b.batter_id,
-        non_striker_id: b.non_striker_id,
-        bowler_id: b.bowler_id,
-        runs: b.runs,
-        extra_runs: b.extra_runs,
-        extra_type: b.extra_type,
-        is_wicket: b.is_wicket,
-        wicket_type: b.wicket_type,
-        is_legal: b.is_legal,
-        caught_by_id: b.caught_by_id,
-        created_at: new Date().toISOString(),
-      };
-    });
-  }, [serverBalls, derivedState, serverInnings, m]);
+  const innings = serverInnings || [];
+  const balls = serverBalls || [];
 
   const [activeTab, setActiveTab] = useState<"live" | "scorecard" | "squads" | "overs">(() => {
     if (typeof window !== "undefined") {
@@ -336,21 +296,21 @@ function MatchDetails() {
     const isWicket = editIsWicket;
     const isLegal = !["wide", "no_ball"].includes(editExtraType);
 
-    const payload = {
-      batter_id: editBatterId,
-      non_striker_id: editingBall.non_striker_id,
-      bowler_id: editBowlerId,
-      runs: editRuns,
-      extra_runs: editExtraType === "none" ? 0 : editExtraRuns,
-      extra_type: editExtraType === "none" ? null : editExtraType,
-      is_wicket: isWicket,
-      wicket_type: isWicket ? editWicketType : null,
-      is_legal: isLegal,
-      caught_by_id: (isWicket && editWicketType === "caught") ? editCaughtById || null : null,
-    };
-
     try {
-      await ballService.updateBall(editingBall.id, payload);
+      await UndoEngine.correctBall(id, editingBall.id, {
+        strikerId: editBatterId,
+        nonStrikerId: editingBall.nonStrikerId || editingBall.non_striker_id,
+        bowlerId: editBowlerId,
+        runsOffBat: editRuns,
+        extras: editExtraType === "none" ? 0 : editExtraRuns,
+        extraType: editExtraType === "none" ? null : editExtraType as any,
+        wicket: isWicket,
+        wicketType: isWicket ? editWicketType : null,
+        dismissedPlayerId: isWicket ? editBatterId : null,
+        metadata: JSON.stringify({
+          caught_by_id: (isWicket && editWicketType === "caught") ? editCaughtById || null : null
+        })
+      });
       toast.success("Ball updated and match recalculated successfully!");
       setIsEditBallOpen(false);
       queryClient.invalidateQueries({ queryKey: ["match", id] });
@@ -367,7 +327,7 @@ function MatchDetails() {
 
     setIsSavingEdit(true);
     try {
-      await ballService.undoBall(editingBall.id);
+      await UndoEngine.deleteBall(id, editingBall.id);
       toast.success("Ball deleted and match recalculated successfully!");
       setIsEditBallOpen(false);
       queryClient.invalidateQueries({ queryKey: ["match", id] });
@@ -516,8 +476,9 @@ function MatchDetails() {
 
     const channel = echoClient.channel(`matches.${id}`);
 
-    channel.listen(".MatchUpdated", (updatedData: any) => {
-      queryClient.setQueryData(["match", id], updatedData);
+    channel.listen(".MatchUpdated", () => {
+      queryClient.invalidateQueries({ queryKey: ["match", id] });
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
     });
 
     return () => {
@@ -535,7 +496,10 @@ function MatchDetails() {
     if (data) {
       const { innings } = data as any;
       if (innings && innings.length > 0 && !selectedOversInningsId) {
-        setSelectedOversInningsId(innings[innings.length - 1].id);
+        const currentActive = innings.find((inn: any) => !inn.is_closed) || innings[innings.length - 1];
+        if (currentActive) {
+          setSelectedOversInningsId(currentActive.id);
+        }
       }
     }
   }, [data, selectedOversInningsId]);
@@ -947,12 +911,12 @@ function MatchDetails() {
         <div className="space-y-4">
           {innings.length > 0 ? (
             (() => {
-              const currentInn = innings[innings.length - 1];
-              const firstInnings = innings.find((inn: any) => inn.innings_no === 1);
+              const currentInn = innings.find((inn: any) => !inn.is_closed) || innings[innings.length - 1];
+              const firstInnings = innings.find((inn: any) => Number(inn.innings_no) === 1);
               const innBalls = (balls ?? []).filter((b: any) => b.innings_id === currentInn.id);
               const currentCRR = ((currentInn.runs / (currentInn.legal_balls || 1)) * 6).toFixed(2);
               const recentBalls = innBalls.slice(-12);
-              const isSecondInnings = currentInn.innings_no === 2;
+              const isSecondInnings = Number(currentInn.innings_no) === 2;
 
               let equationText = "";
               if (isSecondInnings && firstInnings) {
@@ -979,17 +943,10 @@ function MatchDetails() {
 
               return (
                 <div className="space-y-3">
-                  {/* Unsynced indicator */}
-                  {hasUnsynced && (
-                    <div className="flex items-center gap-2 text-xs bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 px-3 py-2 rounded-xl font-semibold">
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                      <span>Showing live local data — syncing to server in background</span>
-                    </div>
-                  )}
                   {/* Big Score Card */}
                   <Card className="p-4 rounded-2xl bg-card border-border flex flex-col justify-center items-center text-center">
                     <div className="text-xs font-bold text-primary uppercase tracking-wider mb-1">
-                      {teamName(currentInn.batting_team_id)} ({currentInn.innings_no === 1 ? "1st Innings" : "2nd Innings"})
+                      {teamName(currentInn.batting_team_id)} ({Number(currentInn.innings_no) === 1 ? "1st Innings" : "2nd Innings"})
                     </div>
                     <div className="text-4xl font-extrabold tracking-tight">
                       {currentInn.runs}/{currentInn.wickets}
@@ -1036,10 +993,10 @@ function MatchDetails() {
                       </div>
                       <div className="space-y-2">
                         {strikerId && (() => {
-                          const p = players.find((pl: any) => pl.id === strikerId);
+                          const p = players.find((pl: any) => String(pl.id) === String(strikerId));
                           if (!p) return null;
-                          const faced = innBalls.filter(b => b.batter_id === p.id && b.is_legal);
-                          const runs = innBalls.filter(b => b.batter_id === p.id).reduce((sum, b) => sum + (b.runs || 0), 0);
+                          const faced = innBalls.filter(b => String(b.batter_id) === String(p.id) && b.is_legal);
+                          const runs = innBalls.filter(b => String(b.batter_id) === String(p.id)).reduce((sum, b) => sum + (b.runs || 0), 0);
                           const sr = faced.length ? ((runs / faced.length) * 100).toFixed(1) : "0.0";
                           return (
                             <div className="flex justify-between items-center text-sm">
@@ -1051,11 +1008,11 @@ function MatchDetails() {
                             </div>
                           );
                         })()}
-                        {nonStrikerId && strikerId !== nonStrikerId && (() => {
-                          const p = players.find((pl: any) => pl.id === nonStrikerId);
+                        {nonStrikerId && String(strikerId) !== String(nonStrikerId) && (() => {
+                          const p = players.find((pl: any) => String(pl.id) === String(nonStrikerId));
                           if (!p) return null;
-                          const faced = innBalls.filter(b => b.batter_id === p.id && b.is_legal);
-                          const runs = innBalls.filter(b => b.batter_id === p.id).reduce((sum, b) => sum + (b.runs || 0), 0);
+                          const faced = innBalls.filter(b => String(b.batter_id) === String(p.id) && b.is_legal);
+                          const runs = innBalls.filter(b => String(b.batter_id) === String(p.id)).reduce((sum, b) => sum + (b.runs || 0), 0);
                           const sr = faced.length ? ((runs / faced.length) * 100).toFixed(1) : "0.0";
                           return (
                             <div className="flex justify-between items-center text-sm">
@@ -1073,9 +1030,9 @@ function MatchDetails() {
 
                   {/* Active Bowler Card */}
                   {bowlerId && (() => {
-                    const p = players.find((pl: any) => pl.id === bowlerId);
+                    const p = players.find((pl: any) => String(pl.id) === String(bowlerId));
                     if (!p) return null;
-                    const bowlerBalls = innBalls.filter(b => b.bowler_id === p.id);
+                    const bowlerBalls = innBalls.filter(b => String(b.bowler_id) === String(p.id));
                     const legalBalls = bowlerBalls.filter(b => b.is_legal).length;
                     const runsConceded = bowlerBalls.reduce((sum, b) => sum + (b.runs || 0) + (b.extra_runs || 0), 0);
                     const wickets = bowlerBalls.filter(b => b.is_wicket).length;
@@ -1164,64 +1121,39 @@ function MatchDetails() {
             innings.map((inn: any) => {
               const innBalls = (balls ?? []).filter((b: any) => b.innings_id === inn.id);
 
-              // Get all unique player IDs who participated in this innings as batter or bowler
-              const activeBatterIds = Array.from(new Set(innBalls.map((b: any) => b.batter_id).filter(Boolean)));
-              const activeBowlerIds = Array.from(new Set(innBalls.map((b: any) => b.bowler_id).filter(Boolean)));
+              const inningsPlayerStats = (playerStats ?? []).filter((s: any) => Number(s.innings_no) === Number(inn.innings_no));
+              const inningsBowlerStats = (bowlerStats ?? []).filter((s: any) => Number(s.innings_no) === Number(inn.innings_no));
 
-              // For batting team: start with players matching batting_team_id, but ensure we add any active batters in innBalls who might be missing
-              const battingTeamPlayers = (players ?? []).filter((p: any) => p.team_id === inn.batting_team_id);
-              activeBatterIds.forEach((id: any) => {
-                if (!battingTeamPlayers.some((p: any) => p.id === id)) {
-                  const foundPlayer = (players ?? []).find((p: any) => p.id === id) || { id, name: "Unknown Player" };
-                  battingTeamPlayers.push(foundPlayer);
-                }
-              });
+              const batterStats = inningsPlayerStats.map(s => {
+                const p = players.find((pl: any) => pl.id === s.player_id) || { id: s.player_id, name: "Unknown Player" };
+                const runs = s.runs;
+                const facedCount = s.balls;
+                const fours = s.fours;
+                const sixes = s.sixes;
+                const sr = s.strike_rate != null ? s.strike_rate.toFixed(1) : "0.0";
+                const isOut = s.is_out === 1;
+                const outDesc = isOut
+                  ? (s.dismissal_type === 'bowled' ? `b ${players.find((pl: any) => pl.id === s.bowler_id)?.name || 'bowler'}`
+                     : s.dismissal_type === 'caught' ? `c ${players.find((pl: any) => pl.id === s.fielder_id)?.name || 'fielder'} b ${players.find((pl: any) => pl.id === s.bowler_id)?.name || 'bowler'}`
+                     : s.dismissal_type === 'run_out' ? `run out (${players.find((pl: any) => pl.id === s.fielder_id)?.name || 'fielder'})`
+                     : s.dismissal_type === 'lbw' ? `lbw b ${players.find((pl: any) => pl.id === s.bowler_id)?.name || 'bowler'}`
+                     : s.dismissal_type || 'out')
+                  : 'not out';
 
-              // For bowling team: start with players matching bowling_team_id, but ensure we add any active bowlers in innBalls who might be missing
-              const bowlingTeamPlayers = (players ?? []).filter((p: any) => p.team_id === inn.bowling_team_id);
-              activeBowlerIds.forEach((id: any) => {
-                if (!bowlingTeamPlayers.some((p: any) => p.id === id)) {
-                  const foundPlayer = (players ?? []).find((p: any) => p.id === id) || { id, name: "Unknown Player" };
-                  bowlingTeamPlayers.push(foundPlayer);
-                }
-              });
-
-              const batterStats = battingTeamPlayers.map(p => {
-                const facedBalls = innBalls.filter(b => b.batter_id === p.id && b.is_legal);
-                const runs = innBalls.filter(b => b.batter_id === p.id).reduce((sum, b) => sum + (b.runs || 0), 0);
-                const fours = innBalls.filter(b => b.batter_id === p.id && b.runs === 4 && b.is_legal && !b.extra_type).length;
-                const sixes = innBalls.filter(b => b.batter_id === p.id && b.runs === 6 && b.is_legal && !b.extra_type).length;
-                const isOut = innBalls.some(b => b.batter_id === p.id && b.is_wicket);
-                const wicketBall = innBalls.find(b => b.batter_id === p.id && b.is_wicket);
-                const facedCount = facedBalls.length;
-                const sr = facedCount > 0 ? ((runs / facedCount) * 100).toFixed(1) : "0.0";
-                return { p, runs, facedCount, fours, sixes, sr, isOut, wicketBall };
+                return { p, runs, facedCount, fours, sixes, sr, isOut, outDesc };
               }).filter(s => s.facedCount > 0 || s.isOut);
 
-              const bowlerStats = bowlingTeamPlayers.map(p => {
-                const bowlerBalls = innBalls.filter(b => b.bowler_id === p.id);
-                const legalBalls = bowlerBalls.filter(b => b.is_legal).length;
-                const runsConceded = bowlerBalls.reduce((sum, b) => sum + (b.runs || 0) + (b.extra_runs || 0), 0);
-                const wickets = bowlerBalls.filter(b => b.is_wicket).length;
-                const econ = legalBalls > 0 ? ((runsConceded / legalBalls) * 6).toFixed(2) : "0.00";
-
-                let maidens = 0;
-                const oversGrouped = bowlerBalls.reduce((acc, b) => {
-                  acc[b.over_number] = acc[b.over_number] || [];
-                  acc[b.over_number].push(b);
-                  return acc;
-                }, {} as Record<number, any[]>);
-                for (const overNo in oversGrouped) {
-                  const overBalls = oversGrouped[overNo];
-                  const legalInOver = overBalls.filter(b => b.is_legal).length;
-                  if (legalInOver === 6) {
-                    const overRuns = overBalls.reduce((sum, b) => sum + (b.runs || 0) + (b.extra_runs || 0), 0);
-                    if (overRuns === 0) maidens++;
-                  }
-                }
-                
-                return { p, overs: oversText(legalBalls), maidens, runsConceded, wickets, econ, legalBalls };
-              }).filter(s => s.legalBalls > 0);
+              const bowlerStats = inningsBowlerStats.map(s => {
+                const p = players.find((pl: any) => pl.id === s.player_id) || { id: s.player_id, name: "Unknown Player" };
+                return {
+                  p,
+                  overs: s.overs,
+                  maidens: s.maidens,
+                  runsConceded: s.runs_conceded,
+                  wickets: s.wickets,
+                  econ: s.economy != null ? s.economy.toFixed(2) : "0.00"
+                };
+              });
 
               const wideCount = innBalls.filter(b => b.extra_type === "wide").reduce((sum, b) => sum + (b.extra_runs || 0), 0);
               const noballCount = innBalls.filter(b => b.extra_type === "no_ball").reduce((sum, b) => sum + (b.extra_runs || 0), 0);
@@ -1491,7 +1423,7 @@ function MatchDetails() {
         <div className="space-y-4">
           {innings.length > 0 ? (
             (() => {
-              const currentSelectedInnings = innings.find((inn: any) => inn.id === selectedOversInningsId) || innings[innings.length - 1];
+              const currentSelectedInnings = innings.find((inn: any) => inn.id === selectedOversInningsId) || innings.find((inn: any) => !inn.is_closed) || innings[innings.length - 1];
               const innBalls = (balls ?? []).filter((b: any) => b.innings_id === currentSelectedInnings.id);
               
               // Group balls by over_number
@@ -1520,7 +1452,10 @@ function MatchDetails() {
                           }`}
                           onClick={() => setSelectedOversInningsId(inn.id)}
                         >
-                          {teamName(inn.batting_team_id)} ({inn.innings_no === 1 ? "1st Inn" : "2nd Inn"})
+                          {(() => {
+                            const name = teamName(inn.batting_team_id);
+                            return name.length > 8 ? name.substring(0, 8) + "…" : name;
+                          })()} ({Number(inn.innings_no) === 1 ? "1st Inn" : "2nd Inn"})
                         </button>
                       ))}
                     </div>
@@ -2221,18 +2156,7 @@ function MatchDetails() {
                       onClick={async () => {
                         setIsSavingEdit(true);
                         try {
-                          await ballService.updateBall(editingBall.id, {
-                            batter_id: editingBall.batter_id,
-                            non_striker_id: editingBall.non_striker_id,
-                            bowler_id: editingBall.bowler_id,
-                            runs: editingBall.runs,
-                            extra_runs: editingBall.extra_runs,
-                            extra_type: editingBall.extra_type,
-                            is_wicket: editingBall.is_wicket,
-                            wicket_type: editingBall.wicket_type,
-                            is_legal: editingBall.is_legal,
-                            caught_by_id: editingBall.caught_by_id,
-                          });
+                          await sqliteService.recalculateMatchStats(id);
                           toast.success("Recalculation completed");
                           queryClient.invalidateQueries({ queryKey: ["match", id] });
                           setIsEditBallOpen(false);

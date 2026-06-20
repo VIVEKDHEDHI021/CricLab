@@ -56,13 +56,14 @@ function PlayerSetupPage() {
           // If no player profile exists, create one auto-linked to this user
           const newPlayer = await playerService.createPlayer({
             name: user.name || "Player",
-            team_id: "", // no team yet
+            team_id: null, // no team yet (null avoids foreign key constraint error)
             mobile: user.mobile,
           });
           setPlayerId(newPlayer.id);
         }
       } catch (err) {
-        // ignore errors
+        console.error("Profile setup initialization error:", err);
+        toast.error("Error setting up player profile: " + (err instanceof Error ? err.message : String(err)));
       } finally {
         setFetching(false);
       }

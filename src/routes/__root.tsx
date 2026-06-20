@@ -1,19 +1,20 @@
 import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { App } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
+import { toast } from "sonner";
 import {
   Outlet,
   Link,
   createRootRouteWithContext,
   useRouter,
-  HeadContent,
-  Scripts,
 } from "@tanstack/react-router";
 
-import appCss from "../styles.css?url";
-import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { AuthProvider } from "@/hooks/useAuth";
 import { Toaster } from "@/components/ui/sonner";
 import { SplashScreen } from "@/components/SplashScreen";
 import { TopLoadingBar } from "@/components/TopLoadingBar";
+import { subscribeToLocalMatchUpdates } from "@/lib/match";
 
 function NotFoundComponent() {
   return (
@@ -73,72 +74,27 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" },
-      { title: "CricLab" },
-      { name: "description", content: "Local cricket management and live scoring" },
-      { property: "og:title", content: "CricLab" },
-      { property: "og:description", content: "Local cricket management and live scoring" },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
-      { name: "theme-color", content: "#ea580c" },
-      { name: "apple-mobile-web-app-capable", content: "yes" },
-      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
-    ],
-    links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
-      {
-        rel: "manifest",
-        href: "/manifest.json",
-      },
-      {
-        rel: "apple-touch-icon",
-        href: "/icon-192.png",
-      },
-    ],
-  }),
-  shellComponent: RootShell,
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
   errorComponent: ErrorComponent,
 });
 
-function RootShell({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <head>
-        <HeadContent />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              (function() {
-                var theme = localStorage.getItem('theme') || 'dark';
-                if (theme === 'dark') {
-                  document.documentElement.classList.add('dark');
-                } else {
-                  document.documentElement.classList.remove('dark');
-                }
-              })();
-            `,
-          }}
-        />
-      </head>
-      <body>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  );
-}
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const router = useRouter();
+
+  useEffect(() => {
+    const unsubscribe = subscribeToLocalMatchUpdates((matchId) => {
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
+      if (matchId) {
+        queryClient.invalidateQueries({ queryKey: ["match", matchId] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["manOfTheDay"] });
+      queryClient.invalidateQueries({ queryKey: ["playerRankings"] });
+    });
+    return unsubscribe;
+  }, [queryClient]);
 
   useEffect(() => {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
@@ -150,6 +106,48 @@ function RootComponent() {
       });
     }
   }, []);
+
+  useEffect(() => {
+    const currentPath = router.state.location.pathname;
+    const isSetupCompleted = localStorage.getItem("criclab_setup_completed");
+    if (!isSetupCompleted && currentPath !== "/migration-import") {
+      router.navigate({ to: "/migration-import" });
+    }
+  }, [router.state.location.pathname, router]);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    let lastTimePressed = 0;
+    const backButtonListener = App.addListener("backButton", async () => {
+      const currentPath = router.state.location.pathname;
+      const isDashboard =
+        currentPath === "/dashboard" || currentPath === "/" || currentPath === "/index";
+
+      if (isDashboard) {
+        const now = Date.now();
+        if (now - lastTimePressed < 2000) {
+          await App.exitApp();
+        } else {
+          lastTimePressed = now;
+          toast("Press back again to exit", {
+            duration: 2000,
+          });
+        }
+      } else if (currentPath.includes("/score")) {
+        const confirmExit = window.confirm("Are you sure you want to exit scoring? Your current progress is saved locally.");
+        if (confirmExit) {
+          router.navigate({ to: "/dashboard" });
+        }
+      } else {
+        window.history.back();
+      }
+    });
+
+    return () => {
+      backButtonListener.then((l) => l.remove());
+    };
+  }, [router]);
 
   return (
     <QueryClientProvider client={queryClient}>

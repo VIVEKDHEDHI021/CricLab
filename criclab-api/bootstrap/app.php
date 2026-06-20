@@ -19,10 +19,19 @@ return Application::configure(basePath: dirname(__DIR__))
             'scorer' => \App\Http\Middleware\EnsureScorer::class,
             'force_password_change' => \App\Http\Middleware\ForcePasswordChange::class,
         ]);
-        $middleware->redirectGuestsTo(fn (Request $request) => $request->is('api/*') || $request->expectsJson() ? null : '/');
+        // Never redirect API requests — always return JSON 401 for unauthenticated calls
+        $middleware->redirectGuestsTo(fn (Request $request) => null);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // All api/* requests should always receive JSON, never HTML
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*'),
+            fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+        // Unauthenticated on API → 401 JSON, never an HTML redirect
+        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json(['message' => 'Unauthenticated.'], 401);
+            }
+        });
     })->create();
+

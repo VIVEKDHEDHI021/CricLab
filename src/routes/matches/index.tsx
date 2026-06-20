@@ -18,6 +18,8 @@ function MatchesList() {
   const { data, isLoading } = useQuery({
     queryKey: ["matches"],
     queryFn: fetchMatchSummaries,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     refetchInterval: (query) => {
       const matches = query.state.data as any[];
       return matches?.some((m: any) => m.status === 'live') ? 5000 : false;
@@ -44,7 +46,6 @@ function MatchesList() {
         <Link to="/teams" className="flex-1"><Button variant="secondary" className="w-full">Teams</Button></Link>
         <Link to="/players" className="flex-1"><Button variant="secondary" className="w-full">Players</Button></Link>
       </div>
-
       {canManage && (
         <Link to="/matches/new" className="block mb-4">
           <Button className="w-full gap-2">
@@ -52,9 +53,7 @@ function MatchesList() {
             Create Match
           </Button>
         </Link>
-      )}
-
-      {isLoading ? (
+      )}      {isLoading ? (
         <div className="text-muted-foreground">Loading…</div>
       ) : (
         <div className="space-y-3">

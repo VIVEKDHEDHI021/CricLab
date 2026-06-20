@@ -6,7 +6,6 @@ import { MilestoneCelebration } from "@/components/MilestoneCelebration";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { matchService } from "@/lib/services/matchService";
 import { inningsService } from "@/lib/services/inningsService";
-import { ballService } from "@/lib/services/ballService";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,8 +46,11 @@ import {
 } from "lucide-react";
 import { WinnerCelebrationOverlay } from "@/components/WinnerCelebrationOverlay";
 import { backupService } from "@/lib/services/backupService";
-import { indexedDbService, BallEvent, LocalSyncQueueItem } from "@/lib/services/indexedDbService";
-import { matchEngine, BallEventData } from "@/lib/services/matchEngine";
+import { BallProcessor } from "@/engine/v2/services/ballProcessor";
+import { UndoEngine } from "@/engine/v2/services/undoEngine";
+import { MatchCompletionEngine } from "@/engine/v2/services/matchCompletionEngine";
+import { eventBus } from "@/engine/v2/events/eventBus";
+import { sqliteService } from "@/lib/services/sqliteService";
 
 export const Route = createFileRoute("/matches/$id/score")({ component: LiveScoring });
 
@@ -199,18 +201,13 @@ function LiveScoring() {
   const [striker, setStriker] = useState<string>("");
   const [nonStriker, setNonStriker] = useState<string>("");
   const [bowler, setBowler] = useState<string>("");
+  const [snapshot, setSnapshot] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Optimistic UI & Sync states
-  const [localEvents, setLocalEvents] = useState<BallEventData[]>([]);
   const [undoStates, setUndoStates] = useState<UndoState[]>([]);
   const [undoneBallIds, setUndoneBallIds] = useState<string[]>([]);
   const [activeExtraKind, setActiveExtraKind] = useState<"wide" | "no_ball" | "bye" | "leg_bye" | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [bypassSyncLock, setBypassSyncLock] = useState(false);
-  const [hasUnsyncedEvents, setHasUnsyncedEvents] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
   const [actionLock, setActionLock] = useState(false);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
   const [lastUndoTime, setLastUndoTime] = useState(0);
@@ -220,7 +217,6 @@ function LiveScoring() {
   // Ball correction states
   const [editedBalls, setEditedBalls] = useState<Record<string, Partial<Ball>>>({});
   const [showUndoBanner, setShowUndoBanner] = useState(false);
-  const [undoCountdown, setUndoCountdown] = useState(10);
   const [isEditBallOpen, setIsEditBallOpen] = useState(false);
   const [editingBall, setEditingBall] = useState<Ball | null>(null);
   const [editBatterId, setEditBatterId] = useState("");
@@ -232,19 +228,6 @@ function LiveScoring() {
   const [editWicketType, setEditWicketType] = useState("bowled");
   const [editCaughtById, setEditCaughtById] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
-
-  // Undo Countdown Timer Effect
-  useEffect(() => {
-    if (!showUndoBanner) return;
-    if (undoCountdown <= 0) {
-      setShowUndoBanner(false);
-      return;
-    }
-    const interval = setInterval(() => {
-      setUndoCountdown((c) => c - 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [showUndoBanner, undoCountdown]);
 
   const handleBallClick = (b: Ball) => {
     if (!canScore) return;
@@ -281,6 +264,7 @@ function LiveScoring() {
     potmBalls: number;
     potmWickets: number;
     potmImpact: number;
+    potmId: string;
   } | null>(null);
 
   const [matchEndedAuto, setMatchEndedAuto] = useState(false);
@@ -391,7 +375,7 @@ function LiveScoring() {
   const [wicketType, setWicketType] = useState<string>("bowled");
   const [caughtById, setCaughtById] = useState<string>("");
   const [dismissedPlayerId, setDismissedPlayerId] = useState<string>("");
-  const playerName = (pid: string) => players.find((p) => p.id === pid)?.name ?? "—";
+  const playerName = (pid: string) => players.find((p) => String(p.id) === String(pid))?.name ?? "—";
 
   const [isLiveSync, setIsLiveSync] = useState(false);
 
@@ -406,84 +390,52 @@ function LiveScoring() {
     }
   };
 
-  // 2. Local Storage Persistence & Recovery
+  // Subscriptions to eventBus
   useEffect(() => {
-    const saved = localStorage.getItem(`criclab_unsynced_events_${id}`);
-    if (saved) {
-      try {
-        setLocalEvents(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse saved unsynced events", e);
+    const unsubSnapshot = eventBus.subscribe("SnapshotUpdated", (payload) => {
+      if (payload.matchId === id) {
+        refreshMatchData();
       }
-    }
-
-    const savedUndo = localStorage.getItem(`criclab_undo_states_${id}`);
-    if (savedUndo) {
-      try {
-        setUndoStates(JSON.parse(savedUndo));
-      } catch (e) {
-        console.error("Failed to parse saved undo states", e);
+    });
+    const unsubCompleted = eventBus.subscribe("MatchCompleted", (payload) => {
+      if (payload.matchId === id) {
+        refreshMatchData();
       }
-    }
+    });
+    const unsubInnings = eventBus.subscribe("InningsCompleted", (payload) => {
+      if (payload.matchId === id) {
+        refreshMatchData();
+      }
+    });
+    const unsubBallAdded = eventBus.subscribe("BallAdded", (payload) => {
+      if (payload.matchId === id) {
+        refreshMatchData();
+      }
+    });
+    const unsubBallCorrected = eventBus.subscribe("BallCorrected", (payload) => {
+      if (payload.matchId === id) {
+        refreshMatchData();
+      }
+    });
+    const unsubBallUndone = eventBus.subscribe("BallUndone", (payload) => {
+      if (payload.matchId === id) {
+        refreshMatchData();
+      }
+    });
 
-    const savedOfflineInnings = localStorage.getItem(`criclab_offline_innings_${id}`);
-    if (savedOfflineInnings) {
-      try {
-        setOfflineInnings(JSON.parse(savedOfflineInnings));
-      } catch (e) {}
-    }
-
-    const savedOfflineClosed = localStorage.getItem(`criclab_offline_closed_innings_${id}`);
-    if (savedOfflineClosed) {
-      try {
-        setOfflineClosedInnings(JSON.parse(savedOfflineClosed));
-      } catch (e) {}
-    }
-
-    const savedOfflineMatch = localStorage.getItem(`criclab_offline_match_updates_${id}`);
-    if (savedOfflineMatch) {
-      try {
-        setOfflineMatchUpdates(JSON.parse(savedOfflineMatch));
-      } catch (e) {}
-    }
+    return () => {
+      unsubSnapshot();
+      unsubCompleted();
+      unsubInnings();
+      unsubBallAdded();
+      unsubBallCorrected();
+      unsubBallUndone();
+    };
   }, [id]);
 
-  useEffect(() => {
-    if (localEvents.length > 0) {
-      localStorage.setItem(`criclab_unsynced_events_${id}`, JSON.stringify(localEvents));
-    } else {
-      localStorage.removeItem(`criclab_unsynced_events_${id}`);
-    }
-  }, [localEvents, id]);
-
-  useEffect(() => {
-    if (undoStates.length > 0) {
-      localStorage.setItem(`criclab_undo_states_${id}`, JSON.stringify(undoStates));
-    } else {
-      localStorage.removeItem(`criclab_undo_states_${id}`);
-    }
-  }, [undoStates, id]);
-
-  const markInningsClosedOffline = (inningsId: string) => {
-    const updated = [...offlineClosedInnings, inningsId];
-    setOfflineClosedInnings(updated);
-    localStorage.setItem(`criclab_offline_closed_innings_${id}`, JSON.stringify(updated));
-  };
-
-  const addInningsOffline = (newInn: any) => {
-    const updated = [...offlineInnings, newInn];
-    setOfflineInnings(updated);
-    localStorage.setItem(`criclab_offline_innings_${id}`, JSON.stringify(updated));
-  };
-
-  const updateOfflineMatch = (updates: any) => {
-    const updated = { ...offlineMatchUpdates, ...updates };
-    setOfflineMatchUpdates(updated);
-    localStorage.setItem(`criclab_offline_match_updates_${id}`, JSON.stringify(updated));
-  };
 
 
-
+  // Full reload: refreshes match data and snapshot from DB
   const reload = async () => {
     try {
       const data = await matchService.getMatch(id);
@@ -492,37 +444,13 @@ function LiveScoring() {
       setInnings(data.innings ?? []);
       setPlayers(data.players ?? []);
       setBalls(data.balls ?? []);
-      localStorage.setItem(`criclab_cached_match_data_${id}`, JSON.stringify(data));
+      setSnapshot(data.snapshot ?? null);
 
       try {
-        const serverEvts = await ballService.getEvents(id);
-        const mappedEvts = serverEvts.map((e) => ({
-          event_uuid: e.event_uuid,
-          event_type: e.event_type,
-          sequence_number: e.sequence_number,
-          match_id: e.match_id,
-          innings_no: e.innings_no,
-          over_no: e.over_no,
-          ball_no: e.ball_no,
-          striker_id: e.striker_id,
-          non_striker_id: e.non_striker_id,
-          bowler_id: e.bowler_id,
-          batting_team_id: e.batting_team_id,
-          bowling_team_id: e.bowling_team_id,
-          runs_off_bat: e.runs_off_bat,
-          extras: e.extras,
-          extra_type: e.extra_type,
-          wicket: e.wicket,
-          wicket_type: e.wicket_type,
-          dismissed_player_id: e.dismissed_player_id,
-          legal_delivery: e.legal_delivery,
-          scorer_id: e.scorer_id,
-          device_timestamp: e.device_timestamp,
-          metadata: typeof e.metadata === 'string' ? JSON.parse(e.metadata) : e.metadata
-        }));
-        await indexedDbService.saveBallEventsBatch(mappedEvts);
-      } catch (evtErr) {
-        console.warn("Could not pull match events from server:", evtErr);
+        const logs = await matchService.getAuditLogs(id);
+        setAuditLogs(logs || []);
+      } catch (logErr) {
+        console.warn("Failed to load audit logs:", logErr);
       }
 
       // Update React Query caches instantly
@@ -531,42 +459,39 @@ function LiveScoring() {
       queryClient.invalidateQueries({ queryKey: ["manOfTheDay"] });
       queryClient.invalidateQueries({ queryKey: ["playerRankings"] });
     } catch (err: any) {
-      console.warn("Failed to load match online, recovering from local cache", err);
-      const cached = localStorage.getItem(`criclab_cached_match_data_${id}`);
-      if (cached) {
-        const data = JSON.parse(cached);
-        setMatch(data.m);
-        setTeams(data.teams ?? []);
-        setInnings(data.innings ?? []);
-        setPlayers(data.players ?? []);
-        setBalls(data.balls ?? []);
-      }
+      console.error("Failed to load match details:", err);
     } finally {
-      const dbEvents = await indexedDbService.getBallEvents(id);
-      setLocalEvents(dbEvents);
       setLoading(false);
+    }
+  };
+
+  // Lightweight refresh: updates match and snapshot from DB
+  const refreshMatchData = async () => {
+    try {
+      const data = await matchService.getMatch(id);
+      setMatch(data.m);
+      setTeams(data.teams ?? []);
+      setInnings(data.innings ?? []);
+      setPlayers(data.players ?? []);
+      setBalls(data.balls ?? []);
+      setSnapshot(data.snapshot ?? null);
+
+      try {
+        const logs = await matchService.getAuditLogs(id);
+        setAuditLogs(logs || []);
+      } catch (logErr) {
+        console.warn("Failed to refresh audit logs:", logErr);
+      }
+
+      queryClient.setQueryData(["match", id], data);
+      queryClient.invalidateQueries({ queryKey: ["matches"] });
+    } catch (err) {
+      console.error("Failed to refresh match data:", err);
     }
   };
 
   useEffect(() => {
     reload();
-
-    if (!echoClient) return;
-
-    updateEchoAuth();
-    setIsLiveSync(true);
-
-    const channel = echoClient.channel(`matches.${id}`);
-
-    channel.listen(".MatchUpdated", (data: any) => {
-      reload();
-    });
-
-    return () => {
-      channel.stopListening(".MatchUpdated");
-      echoClient?.leave(`matches.${id}`);
-      setIsLiveSync(false);
-    };
   }, [id]);
 
   useEffect(() => {
@@ -698,39 +623,14 @@ function LiveScoring() {
     return { striker: expectedStriker || "", nonStriker: expectedNonStriker || "" };
   };
 
-  // 5. Replay local events using MatchEngine to rebuild match state
-  const derivedState = useMemo(() => {
-    if (!serverMatch) return null;
-    return matchEngine.replay(localEvents, {
-      id: serverMatch.id,
-      team_a_id: serverMatch.team_a_id,
-      team_b_id: serverMatch.team_b_id,
-      team_a_name: teams.find((t: any) => t.id === serverMatch.team_a_id)?.name || 'Team A',
-      team_b_name: teams.find((t: any) => t.id === serverMatch.team_b_id)?.name || 'Team B',
-      batting_first_id: serverMatch.batting_first_id,
-      overs: serverMatch.overs,
-      wide_run: serverMatch.wide_run,
-      noball_run: serverMatch.noball_run,
-      last_man_batting: serverMatch.last_man_batting,
-      squad_a_ids: serverMatch.squad_a_ids,
-      squad_b_ids: serverMatch.squad_b_ids
-    });
-  }, [localEvents, serverMatch, teams]);
-
-  const match = useMemo(() => {
-    if (!serverMatch) return null;
-    return {
-      ...serverMatch,
-      ...offlineMatchUpdates,
-      status: derivedState?.status ?? serverMatch.status,
-      result: derivedState?.result ?? serverMatch.result,
-      current_innings: derivedState?.current_innings ?? serverMatch.current_innings
-    };
-  }, [serverMatch, offlineMatchUpdates, derivedState]);
+  const match = serverMatch;
+  const combinedInnings = innings;
+  const combinedBalls = balls;
+  const optimisticInnings = innings;
 
   const isMatchCompleted = useMemo(() => {
-    return derivedState?.status === 'past' || serverMatch?.status === 'past';
-  }, [derivedState, serverMatch]);
+    return match?.status === 'past';
+  }, [match]);
 
   const canScore = useMemo(() => {
     const isOwner = !!(user && serverMatch && serverMatch.created_by === user.id);
@@ -740,70 +640,17 @@ function LiveScoring() {
   const [showAllOvers, setShowAllOvers] = useState(false);
   const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
 
-  const combinedInnings = useMemo(() => {
-    const list = [...innings];
-    offlineInnings.forEach((oi) => {
-      if (!list.some((i) => i.id === oi.id || i.innings_no === oi.innings_no)) {
-        list.push(oi);
-      }
-    });
-    return list;
-  }, [innings, offlineInnings]);
-
-  const combinedBalls = useMemo(() => {
-    if (!derivedState) return [];
-    return derivedState.balls.map((b) => {
-      const inn = combinedInnings.find((i) => i.innings_no === b.innings_no);
-      return {
-        id: b.id,
-        innings_id: inn?.id || `local_inn_${b.innings_no}`,
-        match_id: id,
-        ball_index: b.ball_index,
-        over_number: b.over_number,
-        ball_in_over: b.ball_in_over,
-        batter_id: b.batter_id,
-        non_striker_id: b.non_striker_id,
-        bowler_id: b.bowler_id,
-        runs: b.runs,
-        extra_runs: b.extra_runs,
-        extra_type: b.extra_type,
-        is_wicket: b.is_wicket,
-        wicket_type: b.wicket_type,
-        is_legal: b.is_legal,
-        caught_by_id: b.caught_by_id,
-        created_at: new Date().toISOString()
-      };
-    });
-  }, [derivedState, combinedInnings]);
-
-  // 6. Calculate optimistic Innings state
-  const optimisticInnings = useMemo(() => {
-    return combinedInnings.map((inn) => {
-      const derivedInn = derivedState?.innings[inn.innings_no];
-      if (derivedInn) {
-        return {
-          ...inn,
-          runs: derivedInn.runs,
-          wickets: derivedInn.wickets,
-          legal_balls: derivedInn.legal_balls,
-          is_closed: derivedInn.is_closed,
-        };
-      }
-      return inn;
-    });
-  }, [combinedInnings, derivedState]);
-
-  // Keep striker, nonStriker, and bowler synchronized with derived state
+  // Keep striker, nonStriker, and bowler synchronized with snapshot state
   useEffect(() => {
-    if (derivedState) {
-      if (derivedState.active_striker) setStriker(derivedState.active_striker);
-      if (derivedState.active_non_striker) setNonStriker(derivedState.active_non_striker);
-      if (derivedState.active_bowler) setBowler(derivedState.active_bowler);
+    if (snapshot) {
+      setStriker(snapshot.current_batter_id || "");
+      setNonStriker(snapshot.non_striker_id || "");
+      setBowler(snapshot.current_bowler_id || "");
     }
-  }, [derivedState]);
+  }, [snapshot]);
 
   const currentInn = useMemo(() => {
-    return optimisticInnings.find((i) => i.innings_no === match?.current_innings && !i.is_closed) ||
+    return optimisticInnings.find((i) => Number(i.innings_no) === Number(match?.current_innings) && !i.is_closed) ||
            optimisticInnings[optimisticInnings.length - 1];
   }, [optimisticInnings, match]);
   const battingTeam = currentInn?.batting_team_id;
@@ -811,239 +658,46 @@ function LiveScoring() {
   const battingPlayers = players.filter((p) => p.team_id === battingTeam);
   const bowlingPlayers = players.filter((p) => p.team_id === bowlingTeam);
   const innBalls = useMemo(() => {
-    return combinedBalls.filter((b) => b.innings_id === currentInn?.id);
+    if (!currentInn) return [];
+    return combinedBalls.filter((b) => b.innings_id === currentInn.id || Number(b.innings_no) === Number(currentInn.innings_no));
   }, [combinedBalls, currentInn]);
 
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [showAuditTrail, setShowAuditTrail] = useState(false);
 
-  const logAudit = async (
-    actionType: 'score' | 'correct' | 'undo' | 'sync_attempt' | 'sync_failure',
-    description: string,
-    eventUuid?: string | null,
-    oldState?: any,
-    newState?: any
-  ) => {
-    const logId = crypto.randomUUID ? crypto.randomUUID() : `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const newLog = {
-      id: logId,
-      match_id: id,
-      event_uuid: eventUuid || null,
-      action_type: actionType,
-      user_id: user?.id || null,
-      description,
-      old_state: oldState || null,
-      new_state: newState || null,
-      device_timestamp: Date.now(),
-      synced: false
-    };
-    try {
-      await indexedDbService.saveAuditLog(newLog);
-      const localLogs = await indexedDbService.getAuditLogs(id);
-      try {
-        const serverLogs = await matchService.getAuditLogs(id);
-        const merged = [...serverLogs];
-        localLogs.forEach((ll) => {
-          if (!merged.some((sl) => sl.id === ll.id)) {
-            merged.push(ll);
-          }
-        });
-        setAuditLogs(merged.sort((a, b) => b.device_timestamp - a.device_timestamp));
-      } catch {
-        setAuditLogs(localLogs.sort((a, b) => b.device_timestamp - a.device_timestamp));
-      }
-    } catch (err) {
-      console.error("Failed to save audit log", err);
-    }
-  };
 
-  // 3. Load local data from IndexedDB
-  const loadLocalData = async () => {
-    const dbEvents = await indexedDbService.getBallEvents(id);
-    setLocalEvents(dbEvents);
-    const hasPending = dbEvents.some((e) => e.metadata?.synced === false);
-    setHasUnsyncedEvents(hasPending);
-    if (!hasPending) {
-      setBypassSyncLock(false);
-    }
 
-    try {
-      const serverLogs = await matchService.getAuditLogs(id);
-      const localLogs = await indexedDbService.getAuditLogs(id);
-      const merged = [...serverLogs];
-      localLogs.forEach((ll) => {
-        if (!merged.some((sl) => sl.id === ll.id)) {
-          merged.push(ll);
-        }
-      });
-      setAuditLogs(merged.sort((a, b) => b.device_timestamp - a.device_timestamp));
-    } catch {
-      const localLogs = await indexedDbService.getAuditLogs(id);
-      setAuditLogs(localLogs.sort((a, b) => b.device_timestamp - a.device_timestamp));
-    }
-  };
 
-  useEffect(() => {
-    loadLocalData();
-  }, []);
 
-  // 4. Events Log-Based Background Sync Engine
-  const syncUnsyncedEvents = async () => {
-    if (syncing) return;
-    setSyncing(true);
-    setSyncError(null);
-    try {
-      const local = await indexedDbService.getBallEvents(id);
-      const unsynced = local.filter((e) => e.metadata?.synced === false);
 
-      let didSync = false;
-
-      if (unsynced.length > 0) {
-        didSync = true;
-        await logAudit('sync_attempt', `Attempting to sync ${unsynced.length} pending scoring event(s) to backend.`);
-
-        try {
-          await ballService.syncEvents(id, unsynced);
-          const updatedEvents = unsynced.map(event => ({
-            ...event,
-            metadata: {
-              ...event.metadata,
-              synced: true
-            }
-          }));
-          await indexedDbService.saveBallEventsBatch(updatedEvents);
-        } catch (err: any) {
-          console.error("Batch sync failed", err);
-          await logAudit('sync_failure', `Sync failed: ${err.message || "Network error"}`);
-          throw err;
-        }
-      }
-
-      // Sync unsynced audit logs
-      const unsyncedLogs = await indexedDbService.getUnsyncedAuditLogs(id);
-      if (unsyncedLogs.length > 0) {
-        didSync = true;
-        try {
-          await matchService.syncAuditLogs(id, unsyncedLogs.map(({ synced, ...rest }) => rest));
-          const updatedLogs = unsyncedLogs.map(log => ({ ...log, synced: true }));
-          await indexedDbService.saveAuditLogsBatch(updatedLogs);
-        } catch (err) {
-          console.error("Failed to sync audit logs", err);
-        }
-      }
-
-      // Only perform costly server reloads and audit logs merge if a synchronization actually took place
-      if (didSync) {
-        await reload();
-      }
-
-      const updatedLocal = await indexedDbService.getBallEvents(id);
-      const hasPending = updatedLocal.some((e) => e.metadata?.synced === false);
-      setHasUnsyncedEvents(hasPending);
-      if (!hasPending) {
-        setBypassSyncLock(false);
-      }
-
-      if (didSync) {
-        // Reload merged audit logs
-        try {
-          const serverLogs = await matchService.getAuditLogs(id);
-          const localLogs = await indexedDbService.getAuditLogs(id);
-          const merged = [...serverLogs];
-          localLogs.forEach((ll) => {
-            if (!merged.some((sl) => sl.id === ll.id)) {
-              merged.push(ll);
-            }
-          });
-          setAuditLogs(merged.sort((a, b) => b.device_timestamp - a.device_timestamp));
-        } catch {
-          const localLogs = await indexedDbService.getAuditLogs(id);
-          setAuditLogs(localLogs.sort((a, b) => b.device_timestamp - a.device_timestamp));
-        }
-      }
-    } catch (err: any) {
-      console.error("Sync loop failed", err);
-      setSyncError(err.message || "Network Error");
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      syncUnsyncedEvents();
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [id, currentInn?.id]);
 
   const handleSaveEdit = async () => {
     if (!editingBall) return;
-    if (hasUnsyncedEvents && !bypassSyncLock) {
-      toast.error("Waiting for previous ball to sync...");
-      return;
-    }
+
     setIsSavingEdit(true);
 
     const isWicket = editIsWicket;
-    const isLegal = !["wide", "no_ball"].includes(editExtraType);
-
-    const corrUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
-    const corrEvent: BallEventData = {
-      event_uuid: corrUuid,
-      event_type: 'CORRECTION_EVENT',
-      sequence_number: nextSeq,
-      match_id: id,
-      innings_no: editingBall.innings_no,
-      runs_off_bat: editRuns,
-      extras: editExtraType === "none" ? 0 : editExtraRuns,
-      extra_type: editExtraType === "none" ? null : editExtraType as any,
-      wicket: isWicket,
-      wicket_type: isWicket ? editWicketType : null,
-      dismissed_player_id: isWicket ? editBatterId : null,
-      legal_delivery: isLegal,
-      scorer_id: user?.id || null,
-      device_timestamp: Date.now(),
-      metadata: {
-        target_event_uuid: editingBall.id,
-        striker_id: editBatterId,
-        non_striker_id: editingBall.non_striker_id || null,
-        bowler_id: editBowlerId,
-        runs_off_bat: editRuns,
-        extras: editExtraType === "none" ? 0 : editExtraRuns,
-        extra_type: editExtraType === "none" ? null : editExtraType as any,
-        wicket: isWicket,
-        wicket_type: isWicket ? editWicketType : null,
-        dismissed_player_id: isWicket ? editBatterId : null,
-        legal_delivery: isLegal,
-        caught_by_id: (isWicket && editWicketType === "caught") ? editCaughtById || null : null,
-        synced: false
-      }
-    };
 
     try {
       setIsEditBallOpen(false);
-      await indexedDbService.saveBallEvent(corrEvent);
-      const batterName = playerName(editBatterId) || 'Unknown';
-      const bowlerName = playerName(editBowlerId) || 'Unknown';
-      await logAudit(
-        'correct',
-        `Corrected ball: runs=${editRuns}, extra_runs=${editExtraRuns}, extra_type=${editExtraType}, wicket=${isWicket ? 'yes' : 'no'} (${editWicketType || 'none'}) by batter ${batterName} off bowler ${bowlerName}`,
-        corrUuid,
-        editingBall,
-        corrEvent
-      );
+      await UndoEngine.correctBall(id, editingBall.id, {
+        strikerId: editBatterId,
+        nonStrikerId: editingBall.non_striker_id,
+        bowlerId: editBowlerId,
+        runsOffBat: editRuns,
+        extras: editExtraType === "none" ? 0 : editExtraRuns,
+        extraType: editExtraType === "none" ? null : editExtraType as any,
+        wicket: isWicket,
+        wicketType: isWicket ? editWicketType : null,
+        dismissedPlayerId: isWicket ? editBatterId : null,
+        metadata: JSON.stringify({
+          caught_by_id: (isWicket && editWicketType === "caught") ? editCaughtById || null : null
+        })
+      });
       toast.success("Ball updated successfully");
-      const updated = await indexedDbService.getBallEvents(id);
-      setLocalEvents(updated);
-      try {
-        await syncUnsyncedEvents();
-      } catch (err) {
-        console.warn("Correction sync failed, saved offline");
-      }
+      await refreshMatchData();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message || "Failed to update ball");
+      toast.error(err.message || "Failed to update ball");
     } finally {
       setIsSavingEdit(false);
     }
@@ -1051,46 +705,17 @@ function LiveScoring() {
 
   const handleDeleteBall = async () => {
     if (!editingBall) return;
-    if (hasUnsyncedEvents && !bypassSyncLock) {
-      toast.error("Waiting for previous ball to sync...");
-      return;
-    }
+
     if (!confirm("Are you sure you want to delete this ball? This will recalculate the entire innings.")) return;
 
     setIsSavingEdit(true);
-    const undoUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
-    const undoEvent: BallEventData = {
-      event_uuid: undoUuid,
-      event_type: 'UNDO_EVENT',
-      sequence_number: nextSeq,
-      match_id: id,
-      innings_no: editingBall.innings_no,
-      runs_off_bat: 0,
-      extras: 0,
-      wicket: false,
-      legal_delivery: true,
-      scorer_id: user?.id || null,
-      device_timestamp: Date.now(),
-      metadata: {
-        target_event_uuid: editingBall.id,
-        synced: false
-      }
-    };
-
     try {
       setIsEditBallOpen(false);
-      await indexedDbService.saveBallEvent(undoEvent);
+      await UndoEngine.deleteBall(id, editingBall.id);
       toast.success("Ball deleted successfully");
-      const updated = await indexedDbService.getBallEvents(id);
-      setLocalEvents(updated);
-      try {
-        await syncUnsyncedEvents();
-      } catch (err) {
-        console.warn("Delete ball sync failed, saved offline");
-      }
+      await refreshMatchData();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message || "Failed to delete ball");
+      toast.error(err.message || "Failed to delete ball");
     } finally {
       setIsSavingEdit(false);
     }
@@ -1115,8 +740,8 @@ function LiveScoring() {
     return !!(match?.last_man_batting && activeBattingPlayers.length === 1);
   }, [match, activeBattingPlayers]);
 
-  const firstInnings = useMemo(() => optimisticInnings.find((i) => i.innings_no === 1), [optimisticInnings]);
-  const secondInnings = useMemo(() => optimisticInnings.find((i) => i.innings_no === 2), [optimisticInnings]);
+  const firstInnings = useMemo(() => optimisticInnings.find((i) => Number(i.innings_no) === 1), [optimisticInnings]);
+  const secondInnings = useMemo(() => optimisticInnings.find((i) => Number(i.innings_no) === 2), [optimisticInnings]);
 
   const isInningsOver = useMemo(() => {
     if (!currentInn || !match) return false;
@@ -1128,7 +753,7 @@ function LiveScoring() {
         : 10;
 
     // Check if target is chased
-    if (currentInn.innings_no === 2 && firstInnings && currentInn.runs > firstInnings.runs) {
+    if (Number(currentInn.innings_no) === 2 && firstInnings && currentInn.runs > firstInnings.runs) {
       return true;
     }
 
@@ -1244,7 +869,7 @@ function LiveScoring() {
 
   const strikerStats = useMemo(() => {
     if (!striker) return { runs: 0, balls: 0, sr: "0.0" };
-    const batterBalls = innBalls.filter((b) => b.batter_id === striker);
+    const batterBalls = innBalls.filter((b) => String(b.batter_id) === String(striker));
     const runs = batterBalls.reduce((sum, b) => sum + (b.runs ?? 0), 0);
     const balls = batterBalls.filter((b) => b.extra_type !== "wide").length;
     const sr = balls > 0 ? ((runs / balls) * 100).toFixed(1) : "0.0";
@@ -1253,7 +878,7 @@ function LiveScoring() {
 
   const nonStrikerStats = useMemo(() => {
     if (!nonStriker) return { runs: 0, balls: 0, sr: "0.0" };
-    const batterBalls = innBalls.filter((b) => b.batter_id === nonStriker);
+    const batterBalls = innBalls.filter((b) => String(b.batter_id) === String(nonStriker));
     const runs = batterBalls.reduce((sum, b) => sum + (b.runs ?? 0), 0);
     const balls = batterBalls.filter((b) => b.extra_type !== "wide").length;
     const sr = balls > 0 ? ((runs / balls) * 100).toFixed(1) : "0.0";
@@ -1262,7 +887,7 @@ function LiveScoring() {
 
   const bowlerStats = useMemo(() => {
     if (!bowler) return { overs: "0.0", maidens: 0, runs: 0, wickets: 0 };
-    const bowlerBalls = innBalls.filter((b) => b.bowler_id === bowler);
+    const bowlerBalls = innBalls.filter((b) => String(b.bowler_id) === String(bowler));
 
     const runs = bowlerBalls.reduce((sum, b) => {
       let r = b.runs ?? 0;
@@ -1287,7 +912,7 @@ function LiveScoring() {
     Object.keys(oversGrouped).forEach((oKey) => {
       const oNum = parseInt(oKey);
       const ballsInOver = oversGrouped[oNum];
-      const bowlerBallsInThisOver = ballsInOver.filter((b) => b.bowler_id === bowler);
+      const bowlerBallsInThisOver = ballsInOver.filter((b) => String(b.bowler_id) === String(bowler));
       const legalBowlerBalls = bowlerBallsInThisOver.filter((b) => b.is_legal).length;
       if (legalBowlerBalls === 6) {
         const runsConcededInOver = bowlerBallsInThisOver.reduce((sum, b) => {
@@ -1308,8 +933,8 @@ function LiveScoring() {
 
   const yetToBatPlayers = useMemo(() => {
     return battingPlayers.filter((p) => {
-      if (outBatterIds.has(p.id)) return false;
-      if (p.id === striker || p.id === nonStriker) return false;
+      if (outBatterIds.has(String(p.id))) return false;
+      if (String(p.id) === String(striker) || String(p.id) === String(nonStriker)) return false;
       return true;
     });
   }, [battingPlayers, outBatterIds, striker, nonStriker]);
@@ -1365,7 +990,7 @@ function LiveScoring() {
   const activeBattersStats = useMemo(() => {
     const list: { id: string; name: string; runs: number; balls: number; fours: number; sixes: number; sr: string; isStriker: boolean }[] = [];
     if (striker) {
-      const sBalls = innBalls.filter(b => b.batter_id === striker && b.extra_type !== "wide");
+      const sBalls = innBalls.filter(b => String(b.batter_id) === String(striker) && b.extra_type !== "wide");
       const sRuns = sBalls.reduce((sum, b) => sum + (b.runs ?? 0), 0);
       const fours = sBalls.filter(b => b.runs === 4).length;
       const sixes = sBalls.filter(b => b.runs === 6).length;
@@ -1373,7 +998,7 @@ function LiveScoring() {
       list.push({ id: striker, name: playerName(striker), runs: sRuns, balls: sBalls.length, fours, sixes, sr, isStriker: true });
     }
     if (nonStriker) {
-      const nsBalls = innBalls.filter(b => b.batter_id === nonStriker && b.extra_type !== "wide");
+      const nsBalls = innBalls.filter(b => String(b.batter_id) === String(nonStriker) && b.extra_type !== "wide");
       const nsRuns = nsBalls.reduce((sum, b) => sum + (b.runs ?? 0), 0);
       const fours = nsBalls.filter(b => b.runs === 4).length;
       const sixes = nsBalls.filter(b => b.runs === 6).length;
@@ -1385,7 +1010,7 @@ function LiveScoring() {
 
   const currentBowlerStat = useMemo(() => {
     if (!bowler) return null;
-    const bBalls = innBalls.filter(b => b.bowler_id === bowler);
+    const bBalls = innBalls.filter(b => String(b.bowler_id) === String(bowler));
     const runsConceded = bBalls.reduce((sum, b) => {
       if (b.extra_type === "bye" || b.extra_type === "leg_bye") return sum;
       return sum + (b.runs ?? 0) + (b.extra_runs ?? 0);
@@ -1540,34 +1165,21 @@ function LiveScoring() {
     const bowlingTeamId = battingTeamId === match.team_a_id ? match.team_b_id : match.team_a_id;
     const innNo = (combinedInnings[combinedInnings.length - 1]?.innings_no ?? 0) + 1;
 
-    // Generate local offline innings representation
-    const localInnId = `local_inn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const newLocalInn = {
-      id: localInnId,
-      match_id: id,
-      innings_no: innNo,
-      batting_team_id: battingTeamId,
-      bowling_team_id: bowlingTeamId,
-      runs: 0,
-      wickets: 0,
-      legal_balls: 0,
-      is_closed: false,
-    };
-
     // Close current innings if it's open
     if (currentInn && !currentInn.is_closed) {
       try {
-        try {
-          await syncUnsyncedEvents();
-        } catch (syncErr) {
-          console.warn("Failed to sync final events before closing innings", syncErr);
-        }
         await inningsService.closeInnings(currentInn.id);
       } catch (e) {
-        console.warn("Failed to close innings on server in startInnings, falling back offline:", e);
-        markInningsClosedOffline(currentInn.id);
+        console.warn("Failed to close current innings:", e);
       }
     }
+
+    // Reset local player states to clear past team players
+    setStriker("");
+    setNonStriker("");
+    setBowler("");
+    setShowBatterSelectModal(false);
+    setShowBowlerSelectModal(false);
 
     try {
       await inningsService.startInnings(id, {
@@ -1575,15 +1187,10 @@ function LiveScoring() {
         bowling_team_id: bowlingTeamId,
         innings_no: innNo,
       });
-      reload();
+      toast.success(`Innings ${innNo} started!`);
+      await reload();
     } catch (err: any) {
-      // Offline fallback
-      addInningsOffline(newLocalInn);
-      updateOfflineMatch({
-        status: "live",
-        current_innings: innNo,
-      });
-      toast.success(`Innings ${innNo} started offline!`);
+      toast.error(err.message || "Failed to start innings");
     }
   };
 
@@ -1684,8 +1291,8 @@ function LiveScoring() {
     // 3. Determine winner margins
     let winnerTeamName = "No Result";
     let margin = "Match ended";
-    const inn1 = optimisticInnings.find((inn) => inn.innings_no === 1);
-    const inn2 = optimisticInnings.find((inn) => inn.innings_no === 2);
+    const inn1 = optimisticInnings.find((inn) => Number(inn.innings_no) === 1);
+    const inn2 = optimisticInnings.find((inn) => Number(inn.innings_no) === 2);
 
     if (inn1 && inn2) {
       if (inn2.runs > inn1.runs) {
@@ -1713,11 +1320,12 @@ function LiveScoring() {
       potmBalls: potm.ballsFaced,
       potmWickets: potm.wickets,
       potmImpact: potm.impactScore,
+      potmId: potm.player.id,
     });
   };
 
   const isSecondInningsCompleted = useMemo(() => {
-    return !!(canScore && currentInn && currentInn.innings_no === 2 && isInningsOver);
+    return !!(canScore && currentInn && Number(currentInn.innings_no) === 2 && isInningsOver);
   }, [canScore, currentInn, isInningsOver]);
 
   useEffect(() => {
@@ -1731,7 +1339,7 @@ function LiveScoring() {
   }, [isSecondInningsCompleted, matchEndedAuto, winnerCelebration, match]);
 
   const isFirstInningsCompleted = useMemo(() => {
-    return !!(canScore && currentInn && currentInn.innings_no === 1 && isInningsOver && !currentInn.is_closed);
+    return !!(canScore && currentInn && Number(currentInn.innings_no) === 1 && isInningsOver && !currentInn.is_closed);
   }, [canScore, currentInn, isInningsOver]);
 
   useEffect(() => {
@@ -1740,21 +1348,13 @@ function LiveScoring() {
       const timer = setTimeout(async () => {
         try {
           if (currentInn) {
-            try {
-              await syncUnsyncedEvents();
-            } catch (syncErr) {
-              console.warn("Failed to sync final events before closing innings", syncErr);
-            }
             await inningsService.closeInnings(currentInn.id);
             toast.success("First innings completed!");
-            reload();
+            await reload();
           }
         } catch (err: any) {
-          console.warn("Failed to close innings on server, falling back offline:", err);
-          if (currentInn) {
-            markInningsClosedOffline(currentInn.id);
-            toast.success("First innings completed offline!");
-          }
+          console.error("Failed to close innings:", err);
+          toast.error("Failed to close innings: " + err.message);
         }
       }, 800);
       return () => clearTimeout(timer);
@@ -1774,46 +1374,23 @@ function LiveScoring() {
       resultStr = winnerCelebration?.margin || 'Match Completed';
     }
 
-    // 1. Create and log MATCH_ENDED event locally to keep offline-first timeline intact
-    const endUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
-    const matchEndedEvent: BallEventData = {
-      event_uuid: endUuid,
-      event_type: 'MATCH_ENDED',
-      sequence_number: nextSeq,
-      match_id: id,
-      innings_no: currentInn?.innings_no || 1,
-      runs_off_bat: 0,
-      extras: 0,
-      wicket: false,
-      legal_delivery: true,
-      scorer_id: user?.id || null,
-      device_timestamp: Date.now(),
-      metadata: {
-        result: resultStr,
-        synced: false
-      }
-    };
+    const potmId = winnerCelebration?.potmId || null;
 
     try {
-      await indexedDbService.saveBallEvent(matchEndedEvent);
-      const updated = await indexedDbService.getBallEvents(id);
-      setLocalEvents(updated);
-    } catch (err) {
-      console.error("Failed to save match ended event locally:", err);
-    }
+      await sqliteService.executeTransaction(async (db) => {
+        // Set the match result
+        await db.run("UPDATE v2_matches SET result = ?, man_of_the_match_id = ? WHERE id = ?;", [resultStr, potmId, id]);
+        await db.run("UPDATE matches SET result = ?, man_of_the_match_id = ? WHERE id = ?;", [resultStr, potmId, id]);
+        
+        // Complete the match using MatchCompletionEngine
+        await MatchCompletionEngine.completeMatch(db, id);
+      });
 
-    // 2. Sync events to update the server and refresh query cache
-    try {
-      await syncUnsyncedEvents();
-      toast.success("Match completed and synced successfully!");
-      queryClient.invalidateQueries({ queryKey: ["match", id] });
-      queryClient.invalidateQueries({ queryKey: ["matches"] });
-      queryClient.invalidateQueries({ queryKey: ["manOfTheDay"] });
-      queryClient.invalidateQueries({ queryKey: ["playerRankings"] });
+      toast.success("Match completed successfully!");
+      await reload();
     } catch (err: any) {
-      console.warn("Failed to sync match end immediately, saved offline:", err);
-      toast.warning("Match completed offline. It will be synced when online.");
+      console.error("Failed to complete match:", err);
+      toast.error(err.message || "Failed to complete match");
     }
 
     // Cache the completed match details locally before exporting
@@ -1838,26 +1415,20 @@ function LiveScoring() {
     setShowBackupDialog(true);
   };
 
-  const handleSaveBackup = () => {
+  const handleSaveBackup = async () => {
     if (!backupDialogMetadata) return;
     try {
-      const detail = {
-        m: { ...match, status: 'past', is_closed: true, result: backupDialogMetadata.result },
-        teams,
-        innings: optimisticInnings,
-        players,
-        balls: combinedBalls
-      };
-      const backupData = backupService.generateSingleMatchBackupJSON(id, detail);
-      
+      // Use V2 engine to export directly from SQLite — no reliance on stale in-memory state
+      const backupData = await backupService.exportSingleMatchBackup(id);
+
       const cleanTeamsStr = backupDialogMetadata.teams.replace(/\s+/g, '_');
-      const version = backupData.backupVersion || 1;
+      const version = backupData.version || 1;
       const filename = `${cleanTeamsStr}_v${version}.json`;
-      
-      backupService.downloadBackupFile(filename, backupData);
+
+      await backupService.saveBackupFileToFilesystem(filename, backupData);
       backupService.saveLocalBackup(id, backupData);
-      
-      toast.success("Backup downloaded and saved to local backups!");
+
+      toast.success("Backup saved successfully!");
     } catch (e: any) {
       toast.error("Failed to generate backup: " + e.message);
     } finally {
@@ -1868,10 +1439,7 @@ function LiveScoring() {
 
   const handleNotNowBackup = () => {
     if (!backupDialogMetadata) return;
-    const localVersion = parseInt(localStorage.getItem(`criclab_match_local_version_${id}`) || '1', 10);
-    const cloudVersion = parseInt(localStorage.getItem(`criclab_match_cloud_version_${id}`) || '1', 10);
-    const correctionVersion = parseInt(localStorage.getItem(`criclab_match_correction_version_${id}`) || '1', 10);
-    const backupVersion = Math.max(localVersion, cloudVersion, correctionVersion);
+    const backupVersion = 1;
 
     backupService.markBackupPending(id, {
       date: backupDialogMetadata.date,
@@ -1889,48 +1457,39 @@ function LiveScoring() {
     if (!currentInn) return;
     if (!confirm("Are you sure you want to end this innings manually?")) return;
     try {
-      try {
-        await syncUnsyncedEvents();
-      } catch (syncErr) {
-        console.warn("Failed to sync final events before closing innings", syncErr);
-      }
       await inningsService.closeInnings(currentInn.id);
       toast.success("Innings manually closed");
       setIsMoreOptionsOpen(false);
-      reload();
+      await reload();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message);
+      toast.error(err.message || "Failed to close innings");
     }
   };
 
   const checkCriticalConfirmation = (isLegal: boolean, runsScored: number, isWicket: boolean): boolean => {
-    if (!derivedState || !match) return true;
+    if (!snapshot || !match) return true;
 
-    const currentInn = derivedState.innings[derivedState.current_innings];
-    if (!currentInn) return true;
-
-    const currentWickets = currentInn.wickets;
+    const currentWickets = snapshot.wickets;
     const maxWickets = battingPlayers.length > 0
       ? (match.last_man_batting ? battingPlayers.length : battingPlayers.length - 1)
       : 10;
     
     const isLastWicket = isWicket && (currentWickets + 1 >= maxWickets);
-    const isLastBallOfOvers = isLegal && (currentInn.legal_balls + 1 >= match.overs * 6);
+    const isLastBallOfOvers = isLegal && (snapshot.legalDeliveries + 1 >= match.overs * 6);
 
     // Innings 1 check
-    if (derivedState.current_innings === 1) {
+    if (snapshot.inningsNo === 1) {
       if (isLastWicket || isLastBallOfOvers) {
         return window.confirm("This delivery will end the first innings. Confirm scoring?");
       }
     }
 
     // Innings 2 check
-    if (derivedState.current_innings === 2) {
-      // Find target runs (First innings runs + 1)
-      const inn1 = derivedState.innings[1];
-      if (inn1) {
-        const target = inn1.runs + 1;
-        const willReachTarget = currentInn.runs + runsScored >= target;
+    if (snapshot.inningsNo === 2) {
+      // Find target runs
+      if (snapshot.target) {
+        const target = snapshot.target;
+        const willReachTarget = snapshot.teamScore + runsScored >= target;
         
         if (willReachTarget) {
           return window.confirm("This is the winning ball and will complete the match. Confirm scoring?");
@@ -1960,10 +1519,7 @@ function LiveScoring() {
 
   const executeWicketBall = async (wType: string, dismissedId: string, caughtByPlayerId?: string) => {
     if (actionLock || cooldownRemaining > 0) return;
-    if (hasUnsyncedEvents && !bypassSyncLock) {
-      toast.error("Waiting for previous ball to sync...");
-      return;
-    }
+
     setIsWicketDialogOpen(false);
     if (!currentInn) return toast.error("Start an innings first");
 
@@ -1980,9 +1536,6 @@ function LiveScoring() {
     setActionLock(true);
     setTimeout(() => setActionLock(false), 350);
     setCooldownRemaining(3);
-
-    const actualBatterId = dismissedId;
-    const actualNonStrikerId = dismissedId === striker ? nonStriker : striker;
 
     const ballIndex = innBalls.length;
     const legalCount = currentInn.legal_balls;
@@ -2008,33 +1561,25 @@ function LiveScoring() {
     };
 
     const eventUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
-    const newEvent: BallEventData = {
-      event_uuid: eventUuid,
-      event_type: 'BALL_EVENT',
-      sequence_number: nextSeq,
-      match_id: id,
-      innings_no: currentInn.innings_no,
-      over_no: overNo,
-      ball_no: ballInOver,
-      striker_id: actualBatterId,
-      non_striker_id: isSoloPlay || isLastManActive ? null : actualNonStrikerId,
-      bowler_id: bowler,
-      batting_team_id: currentInn.batting_team_id,
-      bowling_team_id: currentInn.bowling_team_id,
-      runs_off_bat: 0,
+    const ballInput = {
+      eventUuid,
+      matchId: id,
+      inningsNo: Number(currentInn.innings_no),
+      overNo,
+      ballNo: ballInOver,
+      strikerId: striker,
+      nonStrikerId: isSoloPlay || isLastManActive ? '' : nonStriker,
+      bowlerId: bowler,
+      runsOffBat: 0,
       extras: 0,
-      extra_type: null,
+      extraType: null,
       wicket: true,
-      wicket_type: wType,
-      dismissed_player_id: actualBatterId,
-      legal_delivery: true,
-      scorer_id: user?.id || null,
-      device_timestamp: now,
-      metadata: {
-        caught_by_id: wType === "caught" ? caughtByPlayerId || null : null,
-        synced: false
-      }
+      wicketType: wType,
+      dismissedPlayerId: dismissedId,
+      deviceId: user?.id || 'local',
+      metadata: JSON.stringify({
+        caught_by_id: wType === "caught" ? caughtByPlayerId || null : null
+      })
     };
 
     const bowlerBallsBefore = innBalls.filter((b) => b.bowler_id === bowler);
@@ -2076,10 +1621,8 @@ function LiveScoring() {
     const newLegal = currentInn.legal_balls + 1;
     if (newLegal % 6 === 0) {
       if (!isSoloPlay && !isLastManActive) {
-        const currentS = dismissedId === striker ? "" : striker;
-        const currentNS = dismissedId === striker ? nonStriker : "";
-        setStriker(currentNS);
-        setNonStriker(currentS);
+        setStriker(nonStriker);
+        setNonStriker(striker);
       }
       setBowler("");
       toast.success("End of over");
@@ -2096,28 +1639,15 @@ function LiveScoring() {
       toast.success("Innings closed");
     }
 
-    // Save event locally
-    (async () => {
-      await indexedDbService.saveBallEvent(newEvent);
-      const dismissedName = playerName(dismissedId) || 'Unknown';
-      const bowlerName = playerName(bowler) || 'Unknown';
-      await logAudit(
-        'score',
-        `Wicket: ${wType.toUpperCase()} - ${dismissedName} dismissed off bowler ${bowlerName}`,
-        eventUuid,
-        null,
-        newEvent
-      );
-      await loadLocalData();
-      try {
-        await syncUnsyncedEvents();
-      } catch (err) {
-        console.warn("Wicket sync failed, saved offline");
-      }
-    })();
+    try {
+      await BallProcessor.processBall(ballInput);
+      toast.success("Wicket recorded");
+      await reload();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to record wicket");
+    }
 
     setShowUndoBanner(true);
-    setUndoCountdown(5);
   };
 
   const addBall = async (
@@ -2125,10 +1655,7 @@ function LiveScoring() {
     runs = 0,
   ) => {
     if (actionLock || cooldownRemaining > 0) return;
-    if (hasUnsyncedEvents && !bypassSyncLock) {
-      toast.error("Waiting for previous ball to sync...");
-      return;
-    }
+
     if (kind === "wicket") {
       handleWicketClick();
       return;
@@ -2197,33 +1724,22 @@ function LiveScoring() {
     };
 
     const eventUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
-    const newEvent: BallEventData = {
-      event_uuid: eventUuid,
-      event_type: 'BALL_EVENT',
-      sequence_number: nextSeq,
-      match_id: id,
-      innings_no: currentInn.innings_no,
-      over_no: overNo,
-      ball_no: isLegal ? ballInOver : (legalCount % 6) + 1,
-      striker_id: striker,
-      non_striker_id: isSoloPlay || isLastManActive ? null : nonStriker,
-      bowler_id: bowler,
-      batting_team_id: currentInn.batting_team_id,
-      bowling_team_id: currentInn.bowling_team_id,
-      runs_off_bat: batterRuns,
+    const ballInput = {
+      eventUuid,
+      matchId: id,
+      inningsNo: Number(currentInn.innings_no),
+      overNo,
+      ballNo: isLegal ? ballInOver : (legalCount % 6) + 1,
+      strikerId: striker,
+      nonStrikerId: isSoloPlay || isLastManActive ? '' : nonStriker,
+      bowlerId: bowler,
+      runsOffBat: batterRuns,
       extras: extraRuns,
-      extra_type: extraType as any,
+      extraType: extraType as any,
       wicket: isWicket,
-      wicket_type: null,
-      dismissed_player_id: null,
-      legal_delivery: isLegal,
-      scorer_id: user?.id || null,
-      device_timestamp: now,
-      metadata: {
-        caught_by_id: null,
-        synced: false
-      }
+      wicketType: null,
+      dismissedPlayerId: null,
+      deviceId: user?.id || 'local'
     };
 
     const strikerBallsBefore = innBalls.filter((b) => b.batter_id === striker);
@@ -2307,69 +1823,19 @@ function LiveScoring() {
     // Instant tactile/visual feedback
     triggerHaptic();
 
-    // strike rotation on odd batter runs (not on wide; on no_ball with runs yes)
-    if (
-      !isSoloPlay &&
-      !isLastManActive &&
-      (kind === "run" || kind === "bye" || kind === "leg_bye" || kind === "no_ball") &&
-      batterRuns % 2 === 1
-    ) {
-      setStriker(nonStriker);
-      setNonStriker(striker);
+    try {
+      await BallProcessor.processBall(ballInput);
+      toast.success("Ball recorded");
+      await reload();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to record ball");
     }
-    // end of over swap
-    const newLegal = currentInn.legal_balls + (isLegal ? 1 : 0);
-    if (isLegal && newLegal % 6 === 0) {
-      if (!isSoloPlay && !isLastManActive) {
-        setStriker(nonStriker);
-        setNonStriker(striker);
-      }
-      setBowler("");
-      toast.success("End of over");
-    }
-
-    const newWickets = currentInn.wickets + (isWicket ? 1 : 0);
-    const maxWickets =
-      battingPlayers.length > 0
-        ? match.last_man_batting
-          ? battingPlayers.length
-          : battingPlayers.length - 1
-        : 10;
-    if (newLegal >= match.overs * 6 || newWickets >= maxWickets || newWickets >= 10) {
-      toast.success("Innings closed");
-    }
-
-    // Save event locally
-    (async () => {
-      await indexedDbService.saveBallEvent(newEvent);
-      const strikerName = playerName(striker) || 'Unknown';
-      const bowlerName = playerName(bowler) || 'Unknown';
-      await logAudit(
-        'score',
-        `Scored ball: ${kind.toUpperCase()} (${runs} run(s)) by ${strikerName} off ${bowlerName}`,
-        eventUuid,
-        null,
-        newEvent
-      );
-      await loadLocalData();
-      try {
-        await syncUnsyncedEvents();
-      } catch (err) {
-        console.warn("Ball sync failed, saved offline");
-      }
-    })();
     setUnlocked(false);
     setShowUndoBanner(true);
-    setUndoCountdown(5);
   };
 
   const undo = async () => {
     if (!currentInn) return;
-    if (actionLock) return;
-    if (hasUnsyncedEvents && !bypassSyncLock) {
-      toast.error("Waiting for previous ball to sync...");
-      return;
-    }
 
     // Cooldown check
     const now = Date.now();
@@ -2378,36 +1844,14 @@ function LiveScoring() {
       return;
     }
 
-    // Replay event list: Find the target event uuid from the last effective ball event in the log
-    const undoneUuids = localEvents
-      .filter((e) => e.event_type === 'UNDO_EVENT')
-      .map((e) => e.metadata?.target_event_uuid)
-      .filter(Boolean) as string[];
-
-    const lastEffectiveBallEvent = localEvents
-      .filter(e => e.event_type === 'BALL_EVENT' && !undoneUuids.includes(e.event_uuid))
-      .pop();
-
-    if (!lastEffectiveBallEvent) {
-      toast.error("No effective ball event to undo.");
-      return;
-    }
-
-    // 5-second Quick Undo availability check
-    const ageInSeconds = (now - lastEffectiveBallEvent.device_timestamp) / 1000;
-    if (ageInSeconds > 5) {
-      toast.error("Quick Undo window (5s) has expired. Use Ball History to delete/edit older balls.");
-      return;
-    }
-
     setActionLock(true);
     setTimeout(() => setActionLock(false), 400);
 
     // Critical Undo protection
-    const isMatchFinished = derivedState?.status === 'past';
-    const isLastBallOfInnings = derivedState && (
-      derivedState.innings[derivedState.current_innings]?.legal_balls % 6 === 0 &&
-      derivedState.innings[derivedState.current_innings]?.legal_balls > 0
+    const isMatchFinished = match?.status === 'past';
+    const isLastBallOfInnings = currentInn && (
+      currentInn.legal_balls % 6 === 0 &&
+      currentInn.legal_balls > 0
     );
     if (isMatchFinished || isLastBallOfInnings) {
       const confirmMsg = isMatchFinished
@@ -2433,43 +1877,10 @@ function LiveScoring() {
       });
     }
 
-    const undoUuid = crypto.randomUUID ? crypto.randomUUID() : `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const nextSeq = localEvents.length > 0 ? Math.max(...localEvents.map(e => e.sequence_number)) + 1 : 1;
-    const undoEvent: BallEventData = {
-      event_uuid: undoUuid,
-      event_type: 'UNDO_EVENT',
-      sequence_number: nextSeq,
-      match_id: id,
-      innings_no: currentInn.innings_no,
-      runs_off_bat: 0,
-      extras: 0,
-      wicket: false,
-      legal_delivery: true,
-      scorer_id: user?.id || null,
-      device_timestamp: now,
-      metadata: {
-        target_event_uuid: lastEffectiveBallEvent.event_uuid,
-        synced: false
-      }
-    };
-
     try {
-      await indexedDbService.saveBallEvent(undoEvent);
-      await logAudit(
-        'undo',
-        `Undid ball event: ${lastEffectiveBallEvent.event_uuid}`,
-        undoUuid,
-        lastEffectiveBallEvent,
-        undoEvent
-      );
+      await UndoEngine.undoLastBall(id);
       setLastUndoTime(now);
-      const updated = await indexedDbService.getBallEvents(id);
-      setLocalEvents(updated);
-      try {
-        await syncUnsyncedEvents();
-      } catch (err) {
-        console.warn("Undo sync failed, saved offline");
-      }
+      await refreshMatchData();
       toast.success("Last ball undone");
     } catch (err: any) {
       console.error("Failed to undo ball locally", err);
@@ -2703,48 +2114,29 @@ function LiveScoring() {
 
   // Custom Header matching CricketHub branding and user layout
   const CustomHeader = (
-    <div className="bg-card border-b border-border/80 text-foreground py-3 px-4 flex items-center justify-between sticky top-0 z-20 shadow-md">
+    <div 
+      className="bg-card border-b border-border/80 text-foreground pb-3 px-4 flex items-center justify-between sticky top-0 z-20 shadow-md"
+      style={{ paddingTop: "calc(0.75rem + env(safe-area-inset-top))" }}
+    >
       <div className="flex items-center gap-3">
         <button
           onClick={async () => {
-            queryClient.invalidateQueries({ queryKey: ["match", id] });
-            queryClient.invalidateQueries({ queryKey: ["matches"] });
-            nav({ to: "/matches/$id", params: { id } });
+            if (isMatchCompleted) {
+              nav({ to: "/dashboard" });
+            } else if (window.confirm("Are you sure you want to exit scoring? Your current progress is saved locally.")) {
+              queryClient.invalidateQueries({ queryKey: ["match", id] });
+              queryClient.invalidateQueries({ queryKey: ["matches"] });
+              nav({ to: "/dashboard" });
+            }
           }}
           className="hover:bg-accent hover:text-accent-foreground p-1.5 rounded-full transition-colors cursor-pointer text-foreground"
           title="Back to Match"
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <span className="font-bold text-base md:text-lg tracking-wide text-foreground">
-          CricketHub Scoring
+        <span className="font-bold text-base md:text-lg tracking-wide text-foreground truncate max-w-[80px] xs:max-w-[140px] sm:max-w-none">
+          <span className="hidden xs:inline">CricketHub </span>Scoring
         </span>
-        {/* Sync Status Badge */}
-        {hasUnsyncedEvents ? (
-          syncError ? (
-            <div className="flex items-center gap-1 bg-red-950/40 border border-red-500/30 px-2 py-0.5 rounded-full" title={syncError}>
-              <CloudOff className="h-3 w-3 text-red-400 animate-pulse" />
-              <span className="text-[9px] text-red-400 font-bold uppercase tracking-wider">Offline</span>
-            </div>
-          ) : syncing ? (
-            <div className="flex items-center gap-1 bg-sky-950/40 border border-sky-500/30 px-2 py-0.5 rounded-full">
-              <Cloud className="h-3 w-3 text-sky-400 animate-bounce" />
-              <span className="text-[9px] text-sky-400 font-bold uppercase tracking-wider">Syncing</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1 bg-amber-950/40 border border-amber-500/30 px-2 py-0.5 rounded-full">
-              <Cloud className="h-3 w-3 text-amber-400 animate-pulse" />
-              <span className="text-[9px] text-amber-400 font-bold uppercase tracking-wider">Queued</span>
-            </div>
-          )
-        ) : (
-          localEvents.length > 0 && (
-            <div className="flex items-center gap-1 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full">
-              <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-              <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider">Synced</span>
-            </div>
-          )
-        )}
       </div>
       <div className="flex items-center gap-1.5 sm:gap-2">
         <ThemeToggle />
@@ -2803,7 +2195,19 @@ function LiveScoring() {
               <Card className="p-6 rounded-2xl text-center space-y-4 shadow-lg border border-border">
                 <h3 className="font-extrabold text-xl">Match Complete</h3>
                 <p className="text-sm text-muted-foreground">Both innings have completed.</p>
-                {canScore ? (
+                {isMatchCompleted ? (
+                  <div className="space-y-4">
+                    <p className="text-base font-bold text-primary">
+                      {match?.result || serverMatch?.result || "Match Finished"}
+                    </p>
+                    <Button
+                      onClick={() => nav({ to: "/dashboard" })}
+                      className="w-full bg-primary text-primary-foreground font-bold hover:bg-primary/95 rounded-xl py-2.5"
+                    >
+                      Go to Dashboard
+                    </Button>
+                  </div>
+                ) : canScore ? (
                   <Button
                     onClick={() => endMatch()}
                     className="w-full bg-primary text-primary-foreground font-bold hover:bg-primary/95 rounded-xl py-2.5"
@@ -2969,8 +2373,8 @@ function LiveScoring() {
           <Card className="p-4 rounded-2xl relative overflow-hidden border border-border/40 shadow-md">
             <div className="flex items-center justify-between relative pb-1">
               {/* Left Team (GT / 1st Innings) */}
-              <div className="flex-1 flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full flex items-center justify-center font-extrabold text-white bg-blue-600 text-xs shadow-md">
+              <div className="flex-1 flex items-center gap-3 min-w-0">
+                <div className="h-10 w-10 rounded-full flex items-center justify-center font-extrabold text-white bg-blue-600 text-xs shadow-md flex-shrink-0">
                   {team1Abbr}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -2995,7 +2399,7 @@ function LiveScoring() {
               </div>
 
               {/* Right Team (RCB / 2nd Innings) */}
-              <div className="flex-1 flex items-center justify-end gap-3 text-right">
+              <div className="flex-1 flex items-center justify-end gap-3 text-right min-w-0">
                 <div className="flex-1 min-w-0">
                   <h4 className="font-extrabold text-emerald-400 text-sm tracking-wide truncate">
                     {team2Name}
@@ -3010,7 +2414,7 @@ function LiveScoring() {
                     </span>
                   </p>
                 </div>
-                <div className="h-10 w-10 rounded-full flex items-center justify-center font-extrabold text-white bg-emerald-600 text-xs shadow-md">
+                <div className="h-10 w-10 rounded-full flex items-center justify-center font-extrabold text-white bg-emerald-600 text-xs shadow-md flex-shrink-0">
                   {team2Abbr}
                 </div>
               </div>
@@ -3238,7 +2642,7 @@ function LiveScoring() {
             {/* Balls list (1 to 6 slots, expanding dynamically for extras) */}
             <div className="grid grid-cols-6 gap-2 mb-4">
               {(() => {
-                const currentOverNo = Math.floor((currentInn.legal_balls ?? 0) / 6);
+                const currentOverNo = innBalls.length > 0 ? innBalls[innBalls.length - 1].over_number : 0;
                 const currentOverBalls = innBalls.filter(
                   (b) => b.over_number === currentOverNo,
                 );
@@ -3318,7 +2722,7 @@ function LiveScoring() {
                   </div>
                 )}
 
-                <div className={`space-y-3 transition-all duration-200 ${(actionLock || cooldownRemaining > 0 || (hasUnsyncedEvents && !bypassSyncLock)) ? "pointer-events-none opacity-50" : ""}`}>
+                <div className={`space-y-3 transition-all duration-200 ${(actionLock || cooldownRemaining > 0) ? "pointer-events-none opacity-50" : ""}`}>
                 {/* Modifier Helper Banner */}
                 {activeExtraKind && (
                   <div className="bg-primary/10 border border-primary/20 text-primary rounded-xl py-2 px-3 flex items-center justify-between text-xs animate-pulse">
@@ -3571,50 +2975,7 @@ function LiveScoring() {
                 </div>
               </div>
 
-              {hasUnsyncedEvents && !bypassSyncLock && (
-                <div className="absolute inset-0 bg-background/80 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200 border border-border/40 rounded-2xl shadow-2xl">
-                  <div className="relative">
-                    <div className="absolute inset-0 bg-sky-500/20 rounded-full blur-xl animate-pulse" />
-                    <div className="relative bg-gradient-to-tr from-sky-600 to-indigo-600 p-4 rounded-full shadow-lg shadow-sky-500/30 border border-sky-400/30">
-                      <Cloud className="h-8 w-8 text-white animate-bounce" />
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-2 max-w-xs">
-                    <h4 className="font-black text-lg text-foreground tracking-tight">Syncing Live Score...</h4>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      We are securing your last scoring event to the server. Please wait a moment.
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col gap-2 w-full max-w-[240px] pt-2">
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        triggerHaptic();
-                        syncUnsyncedEvents();
-                      }}
-                      className="w-full bg-gradient-to-r from-sky-500 to-indigo-500 hover:from-sky-600 hover:to-indigo-600 text-white font-black text-xs py-2 h-10 rounded-xl shadow-md shadow-sky-500/10 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer border-none"
-                    >
-                      <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
-                      {syncing ? "Syncing..." : "Retry Sync"}
-                    </Button>
-                    
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        triggerHaptic();
-                        setBypassSyncLock(true);
-                        toast.info("Scoring in offline bypass mode. Unsynced balls will sync automatically when connection restores.");
-                      }}
-                      variant="ghost"
-                      className="w-full bg-card hover:bg-muted text-muted-foreground hover:text-foreground font-extrabold text-xs py-2 h-10 rounded-xl border border-border/50 active:scale-95 transition-all cursor-pointer"
-                    >
-                      Score Offline
-                    </Button>
-                  </div>
-                </div>
-              )}
+              {/* Syncing Live Score overlay (disabled for offline scoring) */}
               </div>
             )}
 
@@ -4532,24 +3893,28 @@ function LiveScoring() {
       {showUndoBanner && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm bg-card/95 backdrop-blur border border-border/80 rounded-2xl p-3 flex flex-col gap-2 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-foreground">Ball recorded! Click to undo.</span>
-            <Button
-              size="sm"
-              variant="destructive"
-              className="h-7 text-[10px] font-black uppercase tracking-wider rounded-lg px-3 py-1 active:scale-95 cursor-pointer"
-              onClick={() => {
-                undo();
-                setShowUndoBanner(false);
-              }}
-            >
-              Undo ({undoCountdown}s)
-            </Button>
-          </div>
-          <div className="w-full h-1 bg-border/20 rounded-full overflow-hidden">
-            <div
-              className="bg-primary h-full transition-all duration-1000 ease-linear"
-              style={{ width: `${(undoCountdown / 5) * 100}%` }}
-            />
+            <span className="text-xs font-bold text-foreground">Ball recorded!</span>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-7 text-[10px] font-black uppercase tracking-wider rounded-lg px-3 py-1 active:scale-95 cursor-pointer"
+                onClick={() => {
+                  undo();
+                  setShowUndoBanner(false);
+                }}
+              >
+                Undo
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-[10px] font-black uppercase tracking-wider rounded-lg px-2.5 py-1 active:scale-95 cursor-pointer text-muted-foreground hover:bg-accent"
+                onClick={() => setShowUndoBanner(false)}
+              >
+                Dismiss
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -4733,26 +4098,14 @@ function LiveScoring() {
                       type="button"
                       variant="outline"
                       onClick={async () => {
-                        if (!editingBall) return;
                         setIsSavingEdit(true);
                         try {
-                          await ballService.updateBall(editingBall.id, {
-                            batter_id: editingBall.batter_id,
-                            non_striker_id: editingBall.non_striker_id,
-                            bowler_id: editingBall.bowler_id,
-                            runs: editingBall.runs,
-                            extra_runs: editingBall.extra_runs,
-                            extra_type: editingBall.extra_type,
-                            is_wicket: editingBall.is_wicket,
-                            wicket_type: editingBall.wicket_type,
-                            is_legal: editingBall.is_legal,
-                            caught_by_id: editingBall.caught_by_id,
-                          });
+                          await sqliteService.recalculateMatchStats(id);
                           toast.success("Recalculation completed");
                           await reload();
                           setIsEditBallOpen(false);
                         } catch (err: any) {
-                          toast.error(err.response?.data?.message || err.message || "Recalculation failed");
+                          toast.error(err.message || "Recalculation failed");
                         } finally {
                           setIsSavingEdit(false);
                         }

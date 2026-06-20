@@ -67,7 +67,7 @@ function RegisterPage() {
     setBusy(true);
     try {
       const { token, user: newUser } = await authService.register(name, mobile, username, password, confirm);
-      setToken(token);
+      await setToken(token);
       updateEchoAuth();
       setAuthUser(newUser);
       toast.success("Account created successfully!");

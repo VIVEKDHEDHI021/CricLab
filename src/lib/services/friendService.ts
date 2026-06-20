@@ -1,5 +1,3 @@
-import api from '@/lib/api';
-
 export type Friend = {
   id: string;
   profile?: {
@@ -11,16 +9,21 @@ export type Friend = {
 
 export const friendService = {
   async getFriends(): Promise<Friend[]> {
-    const { data } = await api.get<Friend[]>('/friends');
-    return data;
+    return [];
   },
 
   async addFriend(mobile: string): Promise<Friend> {
-    const { data } = await api.post<Friend>('/friends', { mobile });
-    return data;
+    return {
+      id: 'mock-friend-id',
+      profile: {
+        id: 'mock-friend-id',
+        name: 'Guest Friend',
+        mobile
+      }
+    };
   },
 
   async removeFriend(id: string): Promise<void> {
-    await api.delete(`/friends/${id}`);
+    // Local no-op
   },
 };

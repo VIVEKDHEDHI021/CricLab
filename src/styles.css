@@ -1,6 +1,6 @@
 @import "tailwindcss" source(none);
-@source "../src";
 @import "tw-animate-css";
+@source "../src";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -128,6 +128,7 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    padding-top: env(safe-area-inset-top);
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;

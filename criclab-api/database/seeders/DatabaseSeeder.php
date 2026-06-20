@@ -65,6 +65,8 @@ class DatabaseSeeder extends Seeder
         Player::create(['name' => 'Virat Kohli', 'team_id' => $rcb->id, 'mobile' => '9876543216']);
         Player::create(['name' => 'Faf du Plessis', 'team_id' => $rcb->id, 'mobile' => '9876543217']);
         Player::create(['name' => 'Glenn Maxwell', 'team_id' => $rcb->id, 'mobile' => '9876543218']);
+
+        $this->call(BackupSeeder::class);
     }
 }
 
