@@ -16,33 +16,56 @@ class SqliteService {
   private db: SQLiteDBConnection | null = null;
   private isInitialized = false;
   private transactionQueue: Promise<any> = Promise.resolve();
+  private initPromise: Promise<void> | null = null;
 
   async initialize() {
     if (this.isInitialized) return;
-    this.sqliteConnection = new SQLiteConnection(CapacitorSQLite);
-    
-    const isWeb = Capacitor.getPlatform() === 'web';
-    if (isWeb) {
-      const jeep = document.createElement('jeep-sqlite');
-      document.body.appendChild(jeep);
-      await customElements.whenDefined('jeep-sqlite');
-      await this.sqliteConnection.initWebStore();
+    if (this.initPromise) return this.initPromise;
+
+    this.initPromise = (async () => {
+      this.sqliteConnection = new SQLiteConnection(CapacitorSQLite);
+      
+      const isWeb = Capacitor.getPlatform() === 'web';
+      if (isWeb) {
+        const jeep = document.createElement('jeep-sqlite');
+        document.body.appendChild(jeep);
+        await customElements.whenDefined('jeep-sqlite');
+        await this.sqliteConnection.initWebStore();
+      }
+
+      // Check if connection already exists in pool
+      const isConnRes = await this.sqliteConnection.isConnection('criclab_db', false);
+      if (isConnRes.result) {
+        this.db = await this.sqliteConnection.retrieveConnection('criclab_db', false);
+      } else {
+        this.db = await this.sqliteConnection.createConnection(
+          'criclab_db',
+          false, // encrypted
+          'no-encryption',
+          1, // version
+          false // readonly
+        );
+      }
+
+      // Open database if it is not open
+      const isOpenRes = await this.db.isDBOpen();
+      if (!isOpenRes.result) {
+        await this.db.open();
+      }
+
+      // Run schema creation
+      await this.runMigrations();
+
+      this.isInitialized = true;
+      console.log('SQLite database initialized successfully');
+    })();
+
+    try {
+      await this.initPromise;
+    } catch (err) {
+      this.initPromise = null;
+      throw err;
     }
-
-    this.db = await this.sqliteConnection.createConnection(
-      'criclab_db',
-      false, // encrypted
-      'no-encryption',
-      1, // version
-      false // readonly
-    );
-    await this.db.open();
-
-    // Run schema creation
-    await this.runMigrations();
-
-    this.isInitialized = true;
-    console.log('SQLite database initialized successfully');
   }
 
   async run(query: string, values: any[] = []): Promise<any> {
