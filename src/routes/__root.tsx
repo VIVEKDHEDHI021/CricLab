@@ -155,7 +155,7 @@ function RootComponent() {
         <TopLoadingBar />
         <SplashScreen />
         <Outlet />
-        <Toaster />
+        <Toaster position="top-center" />
       </AuthProvider>
     </QueryClientProvider>
   );

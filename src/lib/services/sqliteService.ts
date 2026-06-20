@@ -24,7 +24,7 @@ class SqliteService {
 
     this.initPromise = (async () => {
       this.sqliteConnection = new SQLiteConnection(CapacitorSQLite);
-      
+
       const isWeb = Capacitor.getPlatform() === 'web';
       if (isWeb) {
         const jeep = document.createElement('jeep-sqlite');
@@ -487,7 +487,7 @@ class SqliteService {
         await this.db!.execute(query);
       }
       console.log("[CricEngineV2] SQLite schema initialized successfully.");
-      
+
       // Auto-fix inconsistent V2 live matches
       try {
         await this.db!.execute(`
@@ -642,7 +642,7 @@ class SqliteService {
    */
   async getPlayerQueryMeta() {
     const cols = await this.getTableColumns('players');
-    
+
     // Choose dynamic name projection expression
     let nameExpr = 'p.name';
     if (cols.includes('name') && cols.includes('full_name')) {
