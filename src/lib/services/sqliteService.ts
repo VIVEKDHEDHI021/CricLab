@@ -53,16 +53,18 @@ class SqliteService {
         await this.db.open();
       }
 
+      this.isInitialized = true;
+
       // Run schema creation
       await this.runMigrations();
 
-      this.isInitialized = true;
       console.log('SQLite database initialized successfully');
     })();
 
     try {
       await this.initPromise;
     } catch (err) {
+      this.isInitialized = false;
       this.initPromise = null;
       throw err;
     }
